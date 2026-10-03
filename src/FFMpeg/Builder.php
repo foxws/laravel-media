@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\FFMpeg;
 
+use Foxws\Media\Concerns\HasSaveCallbacks;
 use Foxws\Media\Encoding\Format;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
@@ -22,6 +23,7 @@ use Illuminate\Support\Traits\Conditionable;
 class Builder
 {
     use Conditionable;
+    use HasSaveCallbacks;
 
     /** @var list<string> */
     protected array $inputArguments = [];
@@ -171,10 +173,20 @@ class Builder
     }
 
     /**
+     * The full command line for writing to the given output path, with sensitive values redacted.
+     */
+    public function command(string $output): string
+    {
+        return $this->runner->commandLine(Executable::FFMpeg, $this->arguments($output));
+    }
+
+    /**
      * Run ffmpeg and save the output to the target disk.
      */
     public function save(string $path): ExportResult
     {
+        $this->runBeforeSavingCallbacks();
+
         $directory = $this->directories->create();
 
         try {
@@ -183,11 +195,15 @@ class Builder
             $target = $this->disk();
 
             $paths = $this->exporter->export($directory, $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility);
-
-            return new ExportResult($target, $paths);
         } finally {
             $this->directories->delete($directory);
         }
+
+        $result = new ExportResult($target, $paths);
+
+        $this->runAfterSavingCallbacks($result);
+
+        return $result;
     }
 
     protected function seconds(float $seconds): string

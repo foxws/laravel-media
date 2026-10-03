@@ -81,6 +81,16 @@ class Runner
     }
 
     /**
+     * The command line the executable would run with, with sensitive values redacted.
+     *
+     * @param  list<string>  $arguments
+     */
+    public function commandLine(Executable $executable, array $arguments): string
+    {
+        return $this->redact([$this->executables->path($executable), ...$arguments]);
+    }
+
+    /**
      * Hide the values of sensitive options, such as encryption keys.
      *
      * @param  list<string>  $command

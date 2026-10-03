@@ -93,3 +93,78 @@ it('removes its temporary output and writes nothing when ffmpeg fails', function
     Storage::disk('videos')->assertMissing('out.mp4');
     Process::assertRan(fn ($process) => ! is_dir(dirname(end($process->command))));
 });
+
+it('shows the full command line it would run', function () {
+    $ffmpeg = fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    $command = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->clip(from: 2, to: 4)->command('out.mp4');
+
+    expect($command)->toBe($ffmpeg.' -y -hide_banner -nostdin -loglevel error -ss 2 -i '.Storage::disk('videos')->path('video.mp4').' -t 2 out.mp4');
+});
+
+it('hides decryption keys in the command line', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    $command = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->addInputArgs(['-decryption_key', '0123456789abcdef0123456789abcdef'])
+        ->command('out.mp4');
+
+    expect($command)->toContain('-decryption_key [REDACTED]')
+        ->not->toContain('0123456789abcdef0123456789abcdef');
+});
+
+it('runs save callbacks around the export with the builder and result', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+    $calls = [];
+
+    $builder = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->beforeSaving(function ($builder) use (&$calls) {
+            $calls[] = ['before', $builder];
+            $builder->addArgs(['-an']);
+        })
+        ->afterSaving(function ($builder, $result) use (&$calls) {
+            $calls[] = ['after', $builder, $result->paths(), Storage::disk('videos')->exists('out.mp4')];
+        });
+
+    $builder->save('out.mp4');
+
+    expect($calls)->toBe([
+        ['before', $builder],
+        ['after', $builder, ['out.mp4'], true],
+    ]);
+    Process::assertRan(fn ($process) => in_array('-an', $process->command, true));
+});
+
+it('runs save callbacks only once', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+    $count = 0;
+    $builder = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->afterSaving(function () use (&$count) {
+        $count++;
+    });
+
+    $builder->save('one.mp4');
+    $builder->save('two.mp4');
+
+    expect($count)->toBe(1);
+});
+
+it('does not run after saving callbacks when ffmpeg fails', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    Process::fake(['*' => Process::result(exitCode: 1)]);
+    $called = false;
+
+    rescue(fn () => Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->afterSaving(function () use (&$called) {
+            $called = true;
+        })
+        ->save('out.mp4'), report: false);
+
+    expect($called)->toBeFalse();
+});
