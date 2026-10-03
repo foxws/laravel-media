@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Exceptions\TemporaryFileException;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Filesystem\TemporaryDirectory;
 
@@ -21,3 +22,20 @@ it('casts to its path', function () {
 
     expect((string) $directory)->toBe('/tmp/media/abc');
 });
+
+it('writes files and creates their folders', function () {
+    $root = sys_get_temp_dir().'/laravel-media-directory-'.bin2hex(random_bytes(4));
+    $directory = new TemporaryDirectory($root, new TemporaryDirectories(sys_get_temp_dir()));
+
+    $file = $directory->put('lists/concat.txt', "file 'a.mp4'\n");
+
+    expect($file)->toBe("{$root}/lists/concat.txt")
+        ->and(file_get_contents($file))->toBe("file 'a.mp4'\n")
+        ->and($directory->makeDirectory('sprites'))->toBe("{$root}/sprites")->toBeDirectory();
+});
+
+it('fails clearly when a file cannot be written', function () {
+    $directory = new TemporaryDirectory('/proc/laravel-media', new TemporaryDirectories(sys_get_temp_dir()));
+
+    $directory->put('concat.txt', 'list');
+})->throws(TemporaryFileException::class, "Can't write the temporary file [/proc/laravel-media/concat.txt]");
