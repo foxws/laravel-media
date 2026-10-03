@@ -10,12 +10,14 @@ use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\FFMpeg\Clip;
 use Foxws\Media\FFMpeg\Output;
 use Foxws\Media\Filters\Fade;
 use Foxws\Media\Filters\Loudnorm;
 use Foxws\Media\Filters\Position;
 use Foxws\Media\Filters\Scale;
 use Foxws\Media\Filters\Volume;
+use Foxws\Media\Process\Progress;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -401,3 +403,56 @@ it('refuses to concatenate files that differ without re-encoding', function () {
 
     Media::fromDisk('videos')->open(['a.mp4', 'b.mp4'])->ffmpeg()->concat()->arguments('joined.mp4');
 })->throws(InvalidMediaException::class, "can't be joined without re-encoding. Use clips()");
+
+it('reports progress against the probed duration', function () {
+    fakeProbes(['video.mp4' => videoProbe(duration: 40)], "out_time_us=10000000\nspeed=2x\nprogress=continue\nout_time_us=40000000\nspeed=2x\nprogress=end\n");
+    Storage::fake('videos');
+    $percentages = [];
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->onProgress(function (Progress $progress) use (&$percentages) {
+            $percentages[] = $progress->percentage();
+        })
+        ->save('out.mp4');
+
+    expect($percentages)->toBe([25.0, 100.0]);
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && array_slice($process->command, 1, 3) === ['-progress', 'pipe:1', '-nostats']);
+});
+
+it('does not ask ffmpeg for progress without a progress callback', function () {
+    fakeProbes(['video.mp4' => videoProbe()]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->save('out.mp4');
+
+    Process::assertDidntRun(fn ($process) => in_array('-progress', $process->command, true));
+    Process::assertDidntRun(fn ($process) => runs($process, Executable::FFProbe));
+});
+
+it('expects the length of a clip, a reel or concatenated files', function () {
+    fakeProbes(['a.mp4' => videoProbe(duration: 60), 'b.mp4' => videoProbe(duration: 30)]);
+    Storage::fake('videos');
+    $builder = fn () => Media::fromDisk('videos')->open(['a.mp4', 'b.mp4'])->ffmpeg();
+
+    expect($builder()->expectedDuration())->toBe(60.0)
+        ->and($builder()->clip(10, 25)->expectedDuration())->toBe(15.0)
+        ->and($builder()->clip(50)->expectedDuration())->toBe(10.0)
+        ->and($builder()->clips([Clip::make(0, 2), Clip::make(5, 9, 'b.mp4')])->expectedDuration())->toBe(6.0)
+        ->and($builder()->concat()->expectedDuration())->toBe(90.0)
+        ->and($builder()->frame(at: 5)->expectedDuration())->toBeNull();
+});
+
+it('reports both passes of a two-pass encode as one percentage', function () {
+    fakeProbes(['video.mp4' => videoProbe(duration: 40)], "out_time_us=20000000\nprogress=continue\n");
+    Storage::fake('videos');
+    $percentages = [];
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->inFormat(Format::h264()->bitrate(2000)->twoPass())
+        ->onProgress(function (Progress $progress) use (&$percentages) {
+            $percentages[] = $progress->percentage();
+        })
+        ->save('out.mp4');
+
+    expect($percentages)->toBe([25.0, 75.0]);
+});

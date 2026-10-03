@@ -34,13 +34,15 @@ class Runner
     ) {}
 
     /**
-     * Run the executable with the given arguments.
+     * Run the executable with the given arguments. The output callback receives
+     * standard output as it streams in, e.g. to parse progress.
      *
      * @param  list<string>  $arguments
+     * @param  (callable(string): mixed)|null  $onOutput
      *
      * @throws ProcessFailedException
      */
-    public function run(Executable $executable, array $arguments, ?int $timeout = null): Result
+    public function run(Executable $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null): Result
     {
         $command = [$this->executables->path($executable), ...$arguments];
 
@@ -52,7 +54,13 @@ class Runner
 
         $startedAt = hrtime(true);
 
-        $processResult = Process::timeout($timeout ?? $this->timeout)->run($command);
+        $processResult = Process::timeout($timeout ?? $this->timeout)
+            ->start($command)
+            ->wait(function (string $type, string $output) use ($onOutput): void {
+                if ($type === 'out' && $onOutput !== null) {
+                    $onOutput($output);
+                }
+            });
 
         $result = new Result(
             executable: $executable,

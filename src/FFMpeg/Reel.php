@@ -97,6 +97,14 @@ final readonly class Reel
     }
 
     /**
+     * The length of the joined video in seconds.
+     */
+    public function duration(): float
+    {
+        return array_sum(array_map(fn (Clip $clip): float => $clip->duration(), $this->clips));
+    }
+
+    /**
      * Audio is joined only when every clip's file has audio; otherwise the reel is silent.
      */
     public function hasAudio(): bool

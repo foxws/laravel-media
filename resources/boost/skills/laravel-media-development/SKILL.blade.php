@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, progress reporting, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -92,6 +92,29 @@ $media->ffmpeg()
 - **`clips()` builds its own inputs and graph,** so it can't be combined with `map()`, `watermark()`, `addOutput()`, `clip()`, `frame()` or `addInputArgs()` (`InvalidFilterException`).
 - **`concat()` joins whole files without re-encoding,** using ffmpeg's concat demuxer and copying streams unless a format is set. The files must share codecs, dimensions and audio layout. Otherwise it throws `InvalidMediaException` and you should use `clips()`.
 - **`clip($from, $to)` on a single file** with `Format::copy()` starts at the keyframe before `$from`. Use a re-encoding format for exact cuts.
+
+## Progress
+
+`onProgress()` receives a `Foxws\Media\Process\Progress` about twice a second while ffmpeg runs. It's available on the ffmpeg builder and on `thumbnails()`.
+
+@boostsnippet("Progress for a queued job", "php")
+use Foxws\Media\Process\Progress;
+
+$media->ffmpeg()
+    ->inFormat(Format::h264())
+    ->onProgress(function (Progress $progress) use ($video) {
+        $progress->percentage();   // 0-100 across all passes, null when the duration is unknown
+        $progress->remaining();    // estimated seconds left, from ffmpeg's speed
+        $progress->speed;          // e.g. 2.5 (times real time)
+
+        $video->update(['progress' => $progress->percentage()]);   // or broadcast an event
+    })
+    ->save('encoded.mp4');
+@endboostsnippet
+
+- The duration comes from the probe, a clip's length, the sum of the clips for `clips()`, or all files for `concat()`. A single `frame()` reports no percentage.
+- Two-pass encodes report one percentage: the first pass is 0-50% and the second 50-100%.
+- Callbacks run inside the job, so keep them cheap (throttle database writes or broadcasts yourself if needed).
 
 ## Several outputs in one run
 

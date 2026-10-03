@@ -6,6 +6,7 @@ namespace Foxws\Media\FFMpeg;
 
 use Closure;
 use Foxws\Media\Concerns\HasSaveCallbacks;
+use Foxws\Media\Concerns\ReportsProgress;
 use Foxws\Media\Encoding\Format;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -24,6 +25,7 @@ use InvalidArgumentException;
 class Thumbnails
 {
     use HasSaveCallbacks;
+    use ReportsProgress;
 
     protected ?float $every = null;
 
@@ -189,6 +191,7 @@ class Thumbnails
             ->inFormat($this->sheetFormat($sheets))
             ->toDisk($this->disk())
             ->when($this->visibility !== null, fn (Builder $builder) => $builder->withVisibility((string) $this->visibility))
+            ->when($this->reportsProgress(), fn (Builder $builder) => $builder->onProgress($this->reportProgress(...)))
             ->save("{$name}_%03d.{$this->extension}");
 
         $sprites = array_map(fn (int $sheet): string => $this->sheetPath($name, $sheet), range(1, $sheets));

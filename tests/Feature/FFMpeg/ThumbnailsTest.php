@@ -137,3 +137,13 @@ it('rejects unsupported sheet formats and intervals', function () {
         ->and(fn () => $thumbnails->every(0))->toThrow(InvalidArgumentException::class)
         ->and(fn () => $thumbnails->count(0))->toThrow(InvalidArgumentException::class);
 });
+
+it('reports the progress of sampling', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)
+        ->onProgress(fn () => null)
+        ->save('storyboard');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && array_slice($process->command, 1, 3) === ['-progress', 'pipe:1', '-nostats']);
+});
