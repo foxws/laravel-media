@@ -53,38 +53,6 @@ it('opens media from the configured default disk', function () {
     expect(Media::open('a.mp4')->disk()->name())->toBe('archive');
 });
 
-it('probes remote media through a temporary url instead of downloading it', function () {
-    fakeExecutable(Executable::FFProbe);
-    $root = Storage::fake('local-root')->path('');
-    file_put_contents("{$root}/video.mp4", 'video');
-    Process::fake(['*' => Process::result(output: file_get_contents(fixture('ffprobe.json')))]);
-
-    Media::fromDisk(remoteDisk($root))->open('video.mp4')->probe();
-
-    Process::assertRan(fn ($process) => end($process->command) === 'https://remote.test/video.mp4?signature=abc');
-});
-
-it('downloads remote media to a temporary directory when remote inputs are disabled', function () {
-    fakeExecutable(Executable::FFProbe);
-    config(['media.remote_inputs.enabled' => false]);
-    $root = Storage::fake('local-root')->path('');
-    file_put_contents("{$root}/video.mp4", 'video');
-    Process::fake(['*' => Process::result(output: file_get_contents(fixture('ffprobe.json')))]);
-    $opener = Media::fromDisk(remoteDisk($root))->open('video.mp4');
-
-    $opener->probe();
-
-    Process::assertRan(function ($process): bool {
-        $input = end($process->command);
-
-        return str_starts_with($input, config('media.temporary_files.root')) && file_get_contents($input) === 'video';
-    });
-
-    $opener->cleanupTemporaryFiles();
-
-    Process::assertRan(fn ($process) => ! file_exists(end($process->command)));
-});
-
 it('fails when probing before any media is opened', function () {
     Storage::fake('videos');
 

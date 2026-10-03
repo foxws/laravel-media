@@ -194,7 +194,7 @@ class Builder
 
             $target = $this->disk();
 
-            $paths = $this->exporter->export($directory, $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility);
+            $paths = $this->exporter->export($directory, $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility, move: true);
         } finally {
             $this->directories->delete($directory);
         }
