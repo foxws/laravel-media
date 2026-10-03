@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, encoding presets, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -65,7 +65,22 @@ $result->paths();  // every written path
 
 ## Formats
 
-`Format::copy()`, `h264()`, `hevc()`, `av1()`, `vp9()`, `webVtt()` and `jpeg()` are presets. They're immutable, so `->withArguments([...])` and `->withoutAudio()` return copies. Use `new Format(container: ..., videoCodec: VideoCodec::..., audioCodec: AudioCodec::...)` for anything else.
+Presets: `Format::copy()`, `h264()`, `hevc()`, `av1()`, `vp9()`, audio-only `aac()`, `mp3()`, `opus()`, `flac()`, plus `webVtt()` and `jpeg()`. Formats are immutable, so every method returns a changed copy:
+
+@boostsnippet("Rate control and streams", "php")
+use Foxws\Media\Encoding\Format;
+
+Format::h264()->crf(20)->preset('slow');                    // constant quality
+Format::h264()->bitrate(2500, max: 3000, buffer: 6000);       // kbit/s; -b:v, -maxrate, -bufsize
+Format::h264()->bitrate(2500)->twoPass();                     // two passes, libx264 or libvpx-vp9 only
+Format::vp9(crf: 31)->bitrate(1800);                           // VP9 constrained quality
+Format::h264()->audioBitrate(128)->audioChannels(2)->sampleRate(48000);
+Format::h264()->withoutAudio();                                // also withoutVideo(), withoutSubtitles()
+Format::mp3(256);                                              // audio only
+@endboostsnippet
+
+- Two-pass needs `bitrate()`. Unsupported codecs or a missing bitrate throw `InvalidFormatException` before ffmpeg runs. The first pass's log file never ends up on the target disk.
+- `withArguments([...])` appends raw output options. For anything else, use `new Format(container: ..., videoCodec: VideoCodec::..., audioCodec: AudioCodec::...)` with named arguments.
 
 ## Exporting
 
