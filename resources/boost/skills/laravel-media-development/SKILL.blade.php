@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, several outputs in one run, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -58,10 +58,35 @@ $result->paths();  // every written path
 - `frame(at: 5.0)->save('thumb.jpg')` grabs one frame as JPEG.
 - `map('0:2')->inFormat(Format::webVtt())->save('captions/nld.vtt')` extracts a subtitle stream.
 - `addArgs([...])` adds output options (for example `['-vf', 'scale=1280:-2']`), and `addInputArgs([...])` adds options placed before every input.
-- `clip()` seeks on the input. With `Format::copy()` the clip starts at the keyframe before `from`.
+- `clip()` seeks on the input, so it applies to every output. With `Format::copy()` the clip starts at the keyframe before `from`.
 - `beforeSaving(fn ($builder) => ...)` can still change the command. `afterSaving(fn ($builder, $result) => ...)` runs once, only after the files are on the target disk.
 - `command('out.mp4')` returns the full command line with keys redacted, without running it.
 - Call `$media->cleanupTemporaryFiles()` in `finally` when remote inputs were downloaded, because queue workers are long-lived.
+
+## Several outputs in one run
+
+`addOutput($path, fn (Output $output) => ...)` writes another file from the same ffmpeg run. Each output has its own `map()`, `inFormat()`, `addFilter()` and `addArgs()`. The inputs are read and decoded once, which is much faster than one run per file.
+
+@boostsnippet("Every subtitle track in one run", "php")
+use Foxws\Media\FFMpeg\Output;
+
+$media = Media::fromDisk('s3')->open('videos/movie.mkv');
+$builder = $media->ffmpeg()->toDisk('captions');
+
+foreach ($media->probe()->subtitleStreams() as $stream) {
+    $builder->addOutput(
+        "{$movie->id}/{$stream->index}_{$stream->language}.vtt",
+        fn (Output $output) => $output->map("0:{$stream->index}")->inFormat(Format::webVtt()),
+    );
+}
+
+$result = $builder->save();   // without a path, only the added outputs are written
+$result->paths();             // in the order they were declared
+@endboostsnippet
+
+- `save('main.mp4')` writes the builder's own output first, followed by the added ones. Relative paths, including folders, are kept on the target disk.
+- Two-pass encoding and `watermark()` only work with a single output, and throw when combined with `addOutput()`.
+- `save()` without a path and without added outputs throws `MediaNotFoundException`.
 
 ## Filters
 

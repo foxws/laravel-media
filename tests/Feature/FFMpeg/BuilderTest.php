@@ -5,9 +5,11 @@ declare(strict_types=1);
 use Foxws\Media\Encoding\Format;
 use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
+use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\FFMpeg\Output;
 use Foxws\Media\Filters\Fade;
 use Foxws\Media\Filters\Loudnorm;
 use Foxws\Media\Filters\Position;
@@ -49,9 +51,8 @@ it('clips the input and saves the result to the target disk', function () {
     expect(Storage::disk('clips')->get('intro/clip.mp4'))->toBe('clip');
     Process::assertRan(fn ($process) => array_slice($process->command, 0, -1) === [
         $ffmpeg, '-y', '-hide_banner', '-nostdin', '-loglevel', 'error',
-        '-ss', '12.5', '-i', Storage::disk('videos')->path('video.mp4'),
+        '-ss', '12.5', '-t', '27.5', '-i', Storage::disk('videos')->path('video.mp4'),
         '-c:v', 'copy', '-c:a', 'copy', '-f', 'mp4',
-        '-t', '27.5',
     ]);
 });
 
@@ -107,7 +108,7 @@ it('shows the full command line it would run', function () {
 
     $command = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->clip(from: 2, to: 4)->command('out.mp4');
 
-    expect($command)->toBe($ffmpeg.' -y -hide_banner -nostdin -loglevel error -ss 2 -i '.Storage::disk('videos')->path('video.mp4').' -t 2 out.mp4');
+    expect($command)->toBe($ffmpeg.' -y -hide_banner -nostdin -loglevel error -ss 2 -t 2 -i '.Storage::disk('videos')->path('video.mp4').' out.mp4');
 });
 
 it('hides decryption keys in the command line', function () {
@@ -273,3 +274,81 @@ it('does not combine a watermark with stream maps', function () {
 
     Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->map('0:v')->watermark('logo.png')->arguments('out.mp4');
 })->throws(InvalidFilterException::class, "can't be combined with map()");
+
+it('writes several outputs in one run and saves them all', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    Storage::fake('captions');
+    Process::fake(['*' => function (PendingProcess $process) {
+        foreach (['/eng.vtt', '/nld.vtt'] as $suffix) {
+            foreach ($process->command as $argument) {
+                if (str_ends_with($argument, $suffix)) {
+                    file_put_contents($argument, 'WEBVTT');
+                }
+            }
+        }
+
+        return Process::result();
+    }]);
+
+    $result = Media::fromDisk('videos')->open('video.mkv')->ffmpeg()
+        ->addOutput('subtitles/nld.vtt', fn (Output $output) => $output->map('0:2')->inFormat(Format::webVtt()))
+        ->addOutput('subtitles/eng.vtt', fn (Output $output) => $output->map('0:3')->inFormat(Format::webVtt()))
+        ->toDisk('captions')
+        ->save();
+
+    expect($result->paths())->toBe(['subtitles/nld.vtt', 'subtitles/eng.vtt']);
+    Storage::disk('captions')->assertExists(['subtitles/nld.vtt', 'subtitles/eng.vtt']);
+    Process::assertRanTimes(fn () => true, 1);
+});
+
+it('places each output after its own options', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->clip(from: 10, to: 20)
+        ->inFormat(Format::h264())
+        ->addOutput('preview.mp4', fn (Output $output) => $output->addFilter(Scale::to(480))->inFormat(Format::h264(crf: 30)->withoutAudio()))
+        ->addOutput('audio.m4a', fn (Output $output) => $output->inFormat(Format::aac()))
+        ->arguments('full.mp4');
+
+    expect(array_slice($arguments, 5, 6))->toBe(['-ss', '10', '-t', '10', '-i', Storage::disk('videos')->path('video.mp4')])
+        ->and(array_slice($arguments, 11))->toBe([
+            '-c:v', 'libx264', '-crf', '23', '-preset', 'medium', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4',
+            'full.mp4',
+            '-vf', 'scale=480:-2', '-c:v', 'libx264', '-crf', '30', '-preset', 'medium', '-an', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4',
+            'preview.mp4',
+            '-vn', '-c:a', 'aac', '-b:a', '160k', '-sn', '-f', 'ipod',
+            'audio.m4a',
+        ]);
+});
+
+it('skips the main output when saving without a path', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    $command = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->addOutput('audio.m4a', fn (Output $output) => $output->inFormat(Format::aac()))
+        ->command();
+
+    expect($command)->toEndWith('-i '.Storage::disk('videos')->path('video.mp4').' -vn -c:a aac -b:a 160k -sn -f ipod audio.m4a');
+});
+
+it('fails to save without a path or outputs', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->save();
+})->throws(MediaNotFoundException::class, 'Nothing to save.');
+
+it('does not combine extra outputs with two-pass encoding or a watermark', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    $builder = fn () => Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->addOutput('audio.m4a');
+
+    expect(fn () => $builder()->inFormat(Format::h264()->bitrate(2000)->twoPass())->save('out.mp4'))
+        ->toThrow(InvalidFormatException::class, "can't be combined with addOutput()")
+        ->and(fn () => $builder()->watermark('logo.png')->command('out.mp4'))
+        ->toThrow(InvalidFilterException::class, "can't be combined with addOutput()");
+});
