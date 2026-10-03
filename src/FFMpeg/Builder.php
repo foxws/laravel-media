@@ -7,6 +7,7 @@ namespace Foxws\Media\FFMpeg;
 use Foxws\Media\Concerns\HasSaveCallbacks;
 use Foxws\Media\Encoding\Format;
 use Foxws\Media\Encoding\VideoCodec;
+use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
@@ -14,6 +15,10 @@ use Foxws\Media\Filesystem\Exporter;
 use Foxws\Media\Filesystem\ExportResult;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\Filters\Filter;
+use Foxws\Media\Filters\FilterType;
+use Foxws\Media\Filters\Number;
+use Foxws\Media\Filters\Position;
 use Foxws\Media\Opener;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -37,6 +42,13 @@ class Builder
     protected array $maps = [];
 
     protected ?Format $format = null;
+
+    /** @var list<Filter> */
+    protected array $filters = [];
+
+    protected ?Media $watermark = null;
+
+    protected string $watermarkFilter = '';
 
     protected ?Disk $targetDisk = null;
 
@@ -120,6 +132,29 @@ class Builder
     }
 
     /**
+     * Apply filters to the output, in order. Video and audio filters form separate chains.
+     */
+    public function addFilter(Filter ...$filters): static
+    {
+        $this->filters = [...$this->filters, ...array_values($filters)];
+
+        return $this;
+    }
+
+    /**
+     * Overlay an image on the video, e.g. a logo. The image is read from the given disk,
+     * or the disk the media was opened from, and scaled to $width pixels wide if given.
+     */
+    public function watermark(string $path, Disk|Filesystem|string|null $disk = null, Position $position = Position::BottomRight, int $margin = 16, ?int $width = null): static
+    {
+        $this->watermark = new Media($disk !== null ? Disk::make($disk) : $this->opener->disk(), $path, $this->directories);
+        $this->watermarkFilter = ($width !== null ? "scale={$width}:-1," : '').'format=rgba';
+        $this->watermarkFilter .= '[wm];[base][wm]overlay='.$position->overlay($margin);
+
+        return $this;
+    }
+
+    /**
      * The disk to save to. Defaults to the disk the media was opened from.
      */
     public function toDisk(Disk|Filesystem|string $disk): static
@@ -168,12 +203,62 @@ class Builder
             '-nostdin',
             '-loglevel', 'error',
             ...$inputs,
-            ...$this->maps,
+            ...($this->watermark !== null ? ['-i', $this->watermark->inputPath()] : []),
+            ...$this->filterArguments(),
             ...($this->format?->toArguments() ?? []),
             ...$this->arguments,
             ...$passArguments,
             $output,
         ];
+    }
+
+    /**
+     * The maps and filter arguments. Plain -vf/-af chains, or a complex graph
+     * with labelled outputs when a watermark adds a second video input.
+     *
+     * @return list<string>
+     *
+     * @throws InvalidFilterException
+     */
+    protected function filterArguments(): array
+    {
+        $video = $this->chain(FilterType::Video);
+        $audio = $this->chain(FilterType::Audio);
+
+        if ($this->watermark === null) {
+            return [
+                ...$this->maps,
+                ...($video !== '' ? ['-vf', $video] : []),
+                ...($audio !== '' ? ['-af', $audio] : []),
+            ];
+        }
+
+        if ($this->maps !== []) {
+            throw InvalidFilterException::watermarkWithMaps();
+        }
+
+        $watermarkInput = count($this->opener->media());
+
+        $graph = sprintf(
+            '[0:v]%s[base];[%d:v]%s[v]',
+            $video !== '' ? $video : 'null',
+            $watermarkInput,
+            $this->watermarkFilter,
+        );
+
+        if ($audio !== '') {
+            $graph .= ";[0:a]{$audio}[a]";
+        }
+
+        return ['-filter_complex', $graph, '-map', '[v]', '-map', $audio !== '' ? '[a]' : '0:a?'];
+    }
+
+    protected function chain(FilterType $type): string
+    {
+        return implode(',', array_map(
+            strval(...),
+            array_filter($this->filters, fn (Filter $filter): bool => $filter->type() === $type),
+        ));
     }
 
     /**
@@ -206,6 +291,7 @@ class Builder
             $paths = $this->exporter->export($directory->path(), $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility, move: true);
         } finally {
             $directory->delete();
+            $this->watermark?->cleanup();
         }
 
         $result = new ExportResult($target, $paths);
@@ -262,6 +348,6 @@ class Builder
 
     protected function seconds(float $seconds): string
     {
-        return rtrim(rtrim(number_format($seconds, 3, '.', ''), '0'), '.');
+        return Number::format($seconds);
     }
 }
