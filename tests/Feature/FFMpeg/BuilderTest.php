@@ -3,10 +3,16 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\Filters\Fade;
+use Foxws\Media\Filters\Loudnorm;
+use Foxws\Media\Filters\Position;
+use Foxws\Media\Filters\Scale;
+use Foxws\Media\Filters\Volume;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -213,3 +219,57 @@ it('rejects two-pass encoding without a target bitrate', function () {
 
     Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->inFormat(Format::h264()->twoPass())->save('encoded.mp4');
 })->throws(InvalidFormatException::class, 'Two-pass encoding needs a target bitrate.');
+
+it('applies video and audio filters as separate chains in order', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->addFilter(Scale::to(1280), Fade::audioIn(1), Fade::in(1))
+        ->addFilter(new Loudnorm)
+        ->inFormat(Format::h264())
+        ->arguments('out.mp4');
+
+    expect(array_slice($arguments, 7, 4))->toBe(['-vf', 'scale=1280:-2,fade=t=in:st=0:d=1', '-af', 'afade=t=in:st=0:d=1,loudnorm=I=-16:TP=-1.5:LRA=11'])
+        ->and($arguments[11])->toBe('-c:v');
+});
+
+it('overlays a watermark from another disk in a complex filter graph', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    Storage::fake('branding');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->addFilter(Scale::to(1280))
+        ->watermark('logo.png', 'branding', Position::TopRight, margin: 24, width: 200)
+        ->arguments('out.mp4');
+
+    expect(array_slice($arguments, 7))->toBe([
+        '-i', Storage::disk('branding')->path('logo.png'),
+        '-filter_complex', '[0:v]scale=1280:-2[base];[1:v]scale=200:-1,format=rgba[wm];[base][wm]overlay=x=W-w-24:y=24[v]',
+        '-map', '[v]', '-map', '0:a?',
+        'out.mp4',
+    ]);
+});
+
+it('filters the audio inside the graph when a watermark is used', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->addFilter(Volume::times(0.5))
+        ->watermark('logo.png')
+        ->arguments('out.mp4');
+
+    expect(array_slice($arguments, 9, 6))->toBe([
+        '-filter_complex', '[0:v]null[base];[1:v]format=rgba[wm];[base][wm]overlay=x=W-w-16:y=H-h-16[v];[0:a]volume=0.5[a]',
+        '-map', '[v]', '-map', '[a]',
+    ]);
+});
+
+it('does not combine a watermark with stream maps', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->map('0:v')->watermark('logo.png')->arguments('out.mp4');
+})->throws(InvalidFilterException::class, "can't be combined with map()");

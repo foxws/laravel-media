@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -62,6 +62,30 @@ $result->paths();  // every written path
 - `beforeSaving(fn ($builder) => ...)` can still change the command. `afterSaving(fn ($builder, $result) => ...)` runs once, only after the files are on the target disk.
 - `command('out.mp4')` returns the full command line with keys redacted, without running it.
 - Call `$media->cleanupTemporaryFiles()` in `finally` when remote inputs were downloaded, because queue workers are long-lived.
+
+## Filters
+
+Filters are ffmpeg (libavfilter) only. They're plain value objects in `Foxws\Media\Filters` that render filter graph strings, so they don't depend on the builder.
+
+@boostsnippet("Filters and watermarks", "php")
+use Foxws\Media\Filters\{Fade, Loudnorm, Position, Scale, Volume};
+
+$media->ffmpeg()
+    ->addFilter(Scale::fit(1080, 1920), Fade::in(1), Fade::out(1, start: 29))   // video chain, in order
+    ->addFilter(new Loudnorm, Fade::audioIn(0.5))                                // audio chain, in order
+    ->watermark('logo.png', disk: 'branding', position: Position::BottomRight, margin: 24, width: 160)
+    ->inFormat(Format::h264())
+    ->save('reels/1.mp4');
+@endboostsnippet
+
+- **Video filters:**
+  - `Scale::to($width, $height)` (a missing side keeps the aspect ratio)
+  - `Scale::fit()` (letterbox to an exact size) and `Scale::fill()` (crop to an exact size)
+  - `new Crop(...)`, `new Pad(...)`, `Rotate::clockwise()`/`counterClockwise()`/`upsideDown()`/`flipHorizontally()`/`flipVertically()`
+  - `new Fps(30)`, `Fade::in()`/`out()`
+- **Audio filters:** `Fade::audioIn()`/`audioOut()`, `Volume::times(0.5)`/`decibels(-6)`, `new Loudnorm(-16, -1.5, 11)`.
+- `Custom::video('hqdn3d')` or `Custom::audio('atempo=1.25')` covers any other filter.
+- Without a watermark, filters become `-vf`/`-af`. A watermark switches to `-filter_complex` with mapped outputs, so it can't be combined with `map()` (that throws `InvalidFilterException`). The watermark is read from the source disk unless another disk is given.
 
 ## Formats
 

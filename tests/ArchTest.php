@@ -17,3 +17,7 @@ arch('the package source declares strict types')
 arch('the core does not depend on tools, encoders, packagers or delivery')
     ->expect(['Foxws\\Media\\Filesystem', 'Foxws\\Media\\Executables', 'Foxws\\Media\\Process', 'Foxws\\Media\\Probe', 'Foxws\\Media\\Encryption'])
     ->not->toUse(['Foxws\\Media\\FFMpeg', 'Foxws\\Media\\Encoding', 'Foxws\\Media\\Packaging', 'Foxws\\Media\\Delivery']);
+
+arch('filters are plain filter graph values that any executable can use')
+    ->expect('Foxws\\Media\\Filters')
+    ->not->toUse(['Foxws\\Media\\FFMpeg', 'Foxws\\Media\\Process', 'Foxws\\Media\\Executables', 'Foxws\\Media\\Filesystem']);
