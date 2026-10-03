@@ -35,7 +35,9 @@ it('writes files and creates their folders', function () {
 });
 
 it('fails clearly when a file cannot be written', function () {
-    $directory = new TemporaryDirectory('/proc/laravel-media', new TemporaryDirectories(sys_get_temp_dir()));
+    $file = tempnam(sys_get_temp_dir(), 'media');
+    $directory = new TemporaryDirectory($file, new TemporaryDirectories(sys_get_temp_dir()));
 
-    $directory->put('concat.txt', 'list');
-})->throws(TemporaryFileException::class, "Can't write the temporary file [/proc/laravel-media/concat.txt]");
+    expect(fn () => $directory->put('concat.txt', 'list'))
+        ->toThrow(TemporaryFileException::class, "Can't write the temporary file [{$file}/concat.txt]");
+});

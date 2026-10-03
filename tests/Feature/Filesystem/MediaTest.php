@@ -13,8 +13,8 @@ it('reads media on a local disk from its own path', function () {
 
     $media = new Media(Disk::make('videos'), 'movies/video.mp4', app(TemporaryDirectories::class));
 
-    expect($media->inputPath())->toBe(Storage::disk('videos')->path('movies/video.mp4'))
-        ->and($media->localPath())->toBe(Storage::disk('videos')->path('movies/video.mp4'));
+    expect($media->inputPath())->toBe(diskPath('videos', 'movies/video.mp4'))
+        ->and($media->localPath())->toBe(diskPath('videos', 'movies/video.mp4'));
 });
 
 it('reads remote media through a temporary url instead of downloading it', function () {
@@ -34,7 +34,7 @@ it('downloads remote media to a temporary directory when remote inputs are disab
 
     $input = $media->inputPath();
 
-    expect($input)->toStartWith(config('media.temporary_files.root'))
+    expect($input)->toStartWith(str_replace('\\', '/', config('media.temporary_files.root')))
         ->and(file_get_contents($input))->toBe('video');
 });
 

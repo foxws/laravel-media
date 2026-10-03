@@ -18,7 +18,7 @@ function fakeThumbnailProcesses(float $duration, bool $video = true): void
     fakeExecutable(Executable::FFMpeg);
 
     Process::fake(['*' => function (PendingProcess $process) use ($duration, $video) {
-        if (str_ends_with($process->command[0], 'ffprobe')) {
+        if (runs($process, Executable::FFProbe)) {
             return Process::result(output: json_encode([
                 'streams' => $video ? [['index' => 0, 'codec_type' => 'video', 'codec_name' => 'h264']] : [],
                 'format' => ['duration' => (string) $duration],
@@ -70,7 +70,7 @@ it('runs ffmpeg once with time based sampling, letterboxed tiles and the sheet c
 
     Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->size(320, 180)->grid(5, 4)->save('storyboard');
 
-    Process::assertRan(fn ($process) => str_ends_with($process->command[0], 'ffmpeg')
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
         && array_slice($process->command, 8, -1) === [
             '-map', '0:v:0',
             '-vf', 'fps=1/10,scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tile=5x4',

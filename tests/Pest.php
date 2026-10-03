@@ -31,9 +31,11 @@ function fakeExecutable(Executable $executable): string
         mkdir($directory, 0777, true);
     }
 
-    $path = "{$directory}/{$executable->value}";
+    $path = PHP_OS_FAMILY === 'Windows'
+        ? "{$directory}/{$executable->value}.bat"
+        : "{$directory}/{$executable->value}";
 
-    file_put_contents($path, "#!/bin/sh\nexit 0\n");
+    file_put_contents($path, PHP_OS_FAMILY === 'Windows' ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
     chmod($path, 0755);
 
     config(["media.executables.{$executable->value}" => $path]);
@@ -121,7 +123,7 @@ function fakeProbes(array $probes, string $ffmpegOutput = ''): void
     fakeExecutable(Executable::FFMpeg);
 
     Process::fake(['*' => function (PendingProcess $process) use ($probes, $ffmpegOutput) {
-        if (! str_ends_with($process->command[0], 'ffprobe')) {
+        if (! runs($process, Executable::FFProbe)) {
             return Process::result(output: $ffmpegOutput);
         }
 
@@ -143,4 +145,20 @@ function videoProbe(int $width = 1920, int $height = 1080, bool $audio = true, s
         ])),
         'format' => ['duration' => (string) $duration],
     ];
+}
+
+/**
+ * Whether a faked process runs the given executable, on any platform.
+ */
+function runs(PendingProcess $process, Executable $executable): bool
+{
+    return is_array($process->command) && pathinfo((string) $process->command[0], PATHINFO_FILENAME) === $executable->value;
+}
+
+/**
+ * A file's path on a disk as the package reports it, with forward slashes.
+ */
+function diskPath(string $disk, string $path = ''): string
+{
+    return str_replace('\\', '/', Storage::disk($disk)->path($path));
 }

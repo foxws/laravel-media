@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\SceneDetector;
@@ -34,7 +35,7 @@ it('scores downscaled frames and prints changes to stdout', function () use ($ou
 
     Media::fromDisk('videos')->open('video.mp4')->scenes(threshold: 0.4);
 
-    Process::assertRan(fn ($process) => str_ends_with($process->command[0], 'ffmpeg')
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
         && array_slice($process->command, 7) === [
             '-map', '0:v:0',
             '-vf', "scale=320:-2,select='gt(scene,0.4)',metadata=print:file=-",
@@ -51,7 +52,7 @@ it('detects scenes once per threshold', function () use ($output) {
     $opener->scenes();
     $opener->scenes(0.5);
 
-    Process::assertRanTimes(fn ($process) => str_ends_with($process->command[0], 'ffmpeg'), 2);
+    Process::assertRanTimes(fn ($process) => runs($process, Executable::FFMpeg), 2);
 });
 
 it('returns a single scene when nothing changes', function () {

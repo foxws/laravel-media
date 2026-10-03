@@ -48,7 +48,7 @@ class Executables
 
         $configured = $this->configured($executable);
 
-        if (str_contains($configured, DIRECTORY_SEPARATOR)) {
+        if (str_contains($configured, '/') || str_contains($configured, '\\')) {
             return $this->resolved[$executable->value] = is_file($configured) && is_executable($configured)
                 ? $configured
                 : null;

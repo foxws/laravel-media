@@ -16,7 +16,7 @@ it('uses a configured absolute path to an executable file', function () {
 it('finds a command name in the PATH', function () {
     config(['media.executables.ffmpeg' => 'sh']);
 
-    expect(Executables::make()->path(Executable::FFMpeg))->toEndWith('/sh');
+    expect(pathinfo(Executables::make()->path(Executable::FFMpeg), PATHINFO_FILENAME))->toBe('sh');
 });
 
 it('reports a missing executable with the environment key to set', function () {
