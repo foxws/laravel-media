@@ -1,7 +1,13 @@
 ---
 name: laravel-media-development
 description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, encoding presets, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+license: MIT
+metadata:
+  author: foxws
 ---
+@php
+/** @var \Laravel\Boost\Install\GuidelineAssist $assist */
+@endphp
 
 # Media with laravel-media
 
@@ -9,7 +15,7 @@ description: Probe and process audio and video with foxws/laravel-media (ffprobe
 
 ## Opening and probing
 
-```php
+@boostsnippet("Opening and probing", "php")
 use Foxws\Media\Facades\Media;
 
 $media = Media::fromDisk('s3')->open('videos/clip.mp4');   // or Media::open(...) for the default disk
@@ -25,14 +31,14 @@ $probe->subtitleStreams();   // list<SubtitleStream> (language, forced())
 $probe->chapters();          // list<Chapter> (title, start, end)
 $probe->format()->bitRate;
 $probe->stream(2)?->get('tags.title');   // any raw ffprobe field via dot notation
-```
+@endboostsnippet
 
 - `open()` accepts several paths. `probe($path)` probes one (the first by default), and `probeAll()` returns them keyed by path. Results are cached on the opener.
 - On disks that provide temporary URLs (S3), ffprobe and ffmpeg read a short-lived signed URL instead of downloading the file. Set `media.remote_inputs.enabled` to false to download to the temporary root instead.
 
 ## Running ffmpeg
 
-```php
+@boostsnippet("Running ffmpeg", "php")
 use Foxws\Media\Encoding\Format;
 
 $result = Media::fromDisk('s3')
@@ -47,7 +53,7 @@ $result = Media::fromDisk('s3')
 
 $result->disk();   // target Disk
 $result->paths();  // every written path
-```
+@endboostsnippet
 
 - `frame(at: 5.0)->save('thumb.jpg')` grabs one frame as JPEG.
 - `map('0:2')->inFormat(Format::webVtt())->save('captions/nld.vtt')` extracts a subtitle stream.
@@ -71,11 +77,11 @@ Failed copies throw `ExportFailedException`, whose `failures` property lists eac
 
 ## Executables
 
-Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `php artisan media:info` to see which are found, with their paths and versions. A missing one throws `ExecutableNotFoundException`, which names the env key to set.
+Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. A missing one throws `ExecutableNotFoundException`, which names the env key to set.
 
 ## Configuration
 
-Publish with `php artisan vendor:publish --tag=media-config`.
+Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}`.
 
 | Key | Purpose |
 | --- | --- |
@@ -97,7 +103,7 @@ Publish with `php artisan vendor:publish --tag=media-config`.
 
 Fake processes, and point the executable at any executable file, because resolution still checks it exists:
 
-```php
+@boostsnippet("Testing with fakes", "php")
 config(['media.executables.ffmpeg' => '/usr/bin/env']);
 Process::fake(['*' => Process::result()]);
 Storage::fake('videos');
@@ -105,6 +111,6 @@ Storage::fake('videos');
 Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->frame(at: 1)->save('thumb.jpg');
 
 Process::assertRan(fn ($process) => in_array('-frames:v', $process->command, true));
-```
+@endboostsnippet
 
 A faked ffmpeg writes no output file, so the export has nothing to copy. Write the file in a `Process::fake` closure (using `end($process->command)` as the path) when the test asserts the target disk.
