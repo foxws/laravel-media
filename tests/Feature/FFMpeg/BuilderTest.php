@@ -355,20 +355,44 @@ it('does not combine extra outputs with two-pass encoding or a watermark', funct
 });
 
 it('joins matching files without re-encoding through a concat list', function () {
-    fakeProbes(['a.mp4' => videoProbe(), 'b.mp4' => videoProbe()]);
-    Storage::fake('videos');
-    $builder = Media::fromDisk('videos')->open(['a.mp4', "it's.mp4"])->ffmpeg()->concat();
     fakeProbes(['a.mp4' => videoProbe(), "it's.mp4" => videoProbe()]);
+    Storage::fake('videos');
 
-    $arguments = $builder->arguments('joined.mp4');
-    $list = $arguments[array_search('-i', $arguments, true) + 1];
+    $arguments = Media::fromDisk('videos')->open(['a.mp4', "it's.mp4"])->ffmpeg()->concat()->arguments('joined.mp4');
 
-    expect(array_slice($arguments, 5, 8))->toBe(['-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file,http,https,tcp,tls,crypto', '-i', $list])
-        ->and(array_slice($arguments, 13))->toBe(['-c:v', 'copy', '-c:a', 'copy', 'joined.mp4'])
-        ->and(file_get_contents($list))->toBe(
+    expect(array_slice($arguments, 5))->toBe([
+        '-f', 'concat', '-safe', '0', '-protocol_whitelist', 'file,http,https,tcp,tls,crypto', '-i', 'concat.txt',
+        '-c:v', 'copy', '-c:a', 'copy',
+        'joined.mp4',
+    ]);
+});
+
+it('writes the concat list with escaped paths when saving and removes it afterwards', function () {
+    fakeExecutable(Executable::FFProbe);
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    $lists = [];
+    Process::fake(['*' => function (PendingProcess $process) use (&$lists) {
+        if (str_ends_with($process->command[0], 'ffprobe')) {
+            return Process::result(output: (string) json_encode(videoProbe()));
+        }
+
+        $list = $process->command[array_search('-i', $process->command, true) + 1];
+        $lists[$list] = file_get_contents($list);
+        file_put_contents(end($process->command), 'joined');
+
+        return Process::result();
+    }]);
+
+    Media::fromDisk('videos')->open(['a.mp4', "it's.mp4"])->ffmpeg()->concat()->save('joined.mp4');
+
+    expect($lists)->toHaveCount(1)
+        ->and(array_values($lists)[0])->toBe(
             "file '".Storage::disk('videos')->path('a.mp4')."'\n"
             ."file '".str_replace("'", "'\\''", Storage::disk('videos')->path("it's.mp4"))."'\n",
-        );
+        )
+        ->and(array_key_first($lists))->toEndWith('/concat.txt')->not->toBeFile();
+    Storage::disk('videos')->assertExists('joined.mp4');
 });
 
 it('refuses to concatenate files that differ without re-encoding', function () {
@@ -377,25 +401,3 @@ it('refuses to concatenate files that differ without re-encoding', function () {
 
     Media::fromDisk('videos')->open(['a.mp4', 'b.mp4'])->ffmpeg()->concat()->arguments('joined.mp4');
 })->throws(InvalidMediaException::class, "can't be joined without re-encoding. Use clips()");
-
-it('removes the concat list after saving', function () {
-    fakeProbes(['a.mp4' => videoProbe(), 'b.mp4' => videoProbe()]);
-    Storage::fake('videos');
-    $lists = [];
-    Process::fake(['*' => function (PendingProcess $process) use (&$lists) {
-        if (str_ends_with($process->command[0], 'ffprobe')) {
-            return Process::result(output: (string) json_encode(videoProbe()));
-        }
-
-        $lists[] = $process->command[array_search('-i', $process->command, true) + 1];
-        file_put_contents(end($process->command), 'joined');
-
-        return Process::result();
-    }]);
-
-    Media::fromDisk('videos')->open(['a.mp4', 'b.mp4'])->ffmpeg()->concat()->save('joined.mp4');
-
-    expect($lists)->toHaveCount(1)
-        ->and($lists[0])->not->toBeFile();
-    Storage::disk('videos')->assertExists('joined.mp4');
-});

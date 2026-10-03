@@ -11,6 +11,7 @@ use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
+use Foxws\Media\Exceptions\TemporaryFileException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
@@ -370,7 +371,11 @@ class Builder
             $declared = array_values(array_filter([$path, ...array_map(fn (Output $output): string => $output->path, $this->outputs)], is_string(...)));
 
             foreach ($declared as $file) {
-                @mkdir(dirname($directory->path($file)), 0777, true);
+                $directory->makeDirectory(dirname($file));
+            }
+
+            if ($this->concat) {
+                $this->writeConcatList();
             }
 
             $this->encode($path !== null ? $directory->path($path) : null, $directory);
@@ -395,7 +400,8 @@ class Builder
     }
 
     /**
-     * The concat demuxer input: a list file of the opened files, after checking they can be joined without re-encoding.
+     * The concat demuxer input, after checking the opened files can be joined without re-encoding.
+     * The list file itself is written when saving, so inspecting the command has no side effects.
      *
      * @return list<string>
      *
@@ -405,21 +411,27 @@ class Builder
     {
         $this->ensureConcatenable();
 
-        $this->concatDirectory ??= $this->directories->createCache();
-
-        $list = implode("\n", array_map(
-            fn (Media $media): string => "file '".str_replace("'", "'\\''", $media->inputPath())."'",
-            $this->opener->media(),
-        ))."\n";
-
-        file_put_contents($this->concatDirectory->path('concat.txt'), $list);
-
         return [
             '-f', 'concat',
             '-safe', '0',
             '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
-            '-i', $this->concatDirectory->path('concat.txt'),
+            '-i', $this->concatDirectory?->path('concat.txt') ?? 'concat.txt',
         ];
+    }
+
+    /**
+     * Write the concat demuxer's list of opened files, outside the output directory.
+     *
+     * @throws TemporaryFileException
+     */
+    protected function writeConcatList(): void
+    {
+        $this->concatDirectory = $this->directories->createCache();
+
+        $this->concatDirectory->put('concat.txt', implode('', array_map(
+            fn (Media $media): string => "file '".str_replace("'", "'\\''", $media->inputPath())."'\n",
+            $this->opener->media(),
+        )));
     }
 
     /**
