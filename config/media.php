@@ -101,4 +101,26 @@ return [
         'cache_min_free' => (int) env('MEDIA_CACHE_FILES_MIN_FREE', 0),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Uploads
+    |--------------------------------------------------------------------------
+    |
+    | How results are copied to S3 disks. Up to `concurrency` files upload at
+    | the same time. Files of at least `multipart_threshold` bytes are sent as
+    | a multipart upload of `multipart_part_size` byte parts (at least 5 MB),
+    | `multipart_concurrency` parts at a time. Multipart uploads are required
+    | for objects over 5 GB, and failed ones are aborted.
+    |
+    | Other disks receive files one at a time.
+    |
+    */
+
+    'uploads' => [
+        'concurrency' => (int) env('MEDIA_UPLOADS_CONCURRENCY', 10),
+        'multipart_threshold' => (int) env('MEDIA_UPLOADS_MULTIPART_THRESHOLD', 64 * 1024 * 1024),
+        'multipart_part_size' => (int) env('MEDIA_UPLOADS_MULTIPART_PART_SIZE', 16 * 1024 * 1024),
+        'multipart_concurrency' => (int) env('MEDIA_UPLOADS_MULTIPART_CONCURRENCY', 5),
+    ],
+
 ];
