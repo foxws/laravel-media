@@ -52,7 +52,7 @@ it('clips the input and saves the result to the target disk', function () {
     expect(Storage::disk('clips')->get('intro/clip.mp4'))->toBe('clip');
     Process::assertRan(fn ($process) => array_slice($process->command, 0, -1) === [
         $ffmpeg, '-y', '-hide_banner', '-nostdin', '-loglevel', 'error',
-        '-ss', '12.5', '-t', '27.5', '-i', Storage::disk('videos')->path('video.mp4'),
+        '-ss', '12.5', '-t', '27.5', '-i', diskPath('videos', 'video.mp4'),
         '-c:v', 'copy', '-c:a', 'copy', '-f', 'mp4',
     ]);
 });
@@ -109,7 +109,7 @@ it('shows the full command line it would run', function () {
 
     $command = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->clip(from: 2, to: 4)->command('out.mp4');
 
-    expect($command)->toBe($ffmpeg.' -y -hide_banner -nostdin -loglevel error -ss 2 -t 2 -i '.Storage::disk('videos')->path('video.mp4').' out.mp4');
+    expect($command)->toBe($ffmpeg.' -y -hide_banner -nostdin -loglevel error -ss 2 -t 2 -i '.diskPath('videos', 'video.mp4').' out.mp4');
 });
 
 it('hides decryption keys in the command line', function () {
@@ -193,7 +193,7 @@ it('encodes in two passes with a shared log file outside the output', function (
 
         return $passArguments[0] === '-pass' && $passArguments[1] === '1'
             && array_slice($passArguments, 4) === ['-an', '-f', 'null']
-            && end($process->command) === '/dev/null';
+            && end($process->command) === (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null');
     });
     Process::assertRan(fn ($process) => array_slice($process->command, -5, 2) === ['-pass', '2']
         && str_ends_with(end($process->command), '/encoded.mp4'));
@@ -247,7 +247,7 @@ it('overlays a watermark from another disk in a complex filter graph', function 
         ->arguments('out.mp4');
 
     expect(array_slice($arguments, 7))->toBe([
-        '-i', Storage::disk('branding')->path('logo.png'),
+        '-i', diskPath('branding', 'logo.png'),
         '-filter_complex', '[0:v]scale=1280:-2[base];[1:v]scale=200:-1,format=rgba[wm];[base][wm]overlay=x=W-w-24:y=24[v]',
         '-map', '[v]', '-map', '0:a?',
         'out.mp4',
@@ -314,7 +314,7 @@ it('places each output after its own options', function () {
         ->addOutput('audio.m4a', fn (Output $output) => $output->inFormat(Format::aac()))
         ->arguments('full.mp4');
 
-    expect(array_slice($arguments, 5, 6))->toBe(['-ss', '10', '-t', '10', '-i', Storage::disk('videos')->path('video.mp4')])
+    expect(array_slice($arguments, 5, 6))->toBe(['-ss', '10', '-t', '10', '-i', diskPath('videos', 'video.mp4')])
         ->and(array_slice($arguments, 11))->toBe([
             '-c:v', 'libx264', '-crf', '23', '-preset', 'medium', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4',
             'full.mp4',
@@ -333,7 +333,7 @@ it('skips the main output when saving without a path', function () {
         ->addOutput('audio.m4a', fn (Output $output) => $output->inFormat(Format::aac()))
         ->command();
 
-    expect($command)->toEndWith('-i '.Storage::disk('videos')->path('video.mp4').' -vn -c:a aac -b:a 160k -sn -f ipod audio.m4a');
+    expect($command)->toEndWith('-i '.diskPath('videos', 'video.mp4').' -vn -c:a aac -b:a 160k -sn -f ipod audio.m4a');
 });
 
 it('fails to save without a path or outputs', function () {
@@ -373,7 +373,7 @@ it('writes the concat list with escaped paths when saving and removes it afterwa
     Storage::fake('videos');
     $lists = [];
     Process::fake(['*' => function (PendingProcess $process) use (&$lists) {
-        if (str_ends_with($process->command[0], 'ffprobe')) {
+        if (runs($process, Executable::FFProbe)) {
             return Process::result(output: (string) json_encode(videoProbe()));
         }
 
@@ -388,8 +388,8 @@ it('writes the concat list with escaped paths when saving and removes it afterwa
 
     expect($lists)->toHaveCount(1)
         ->and(array_values($lists)[0])->toBe(
-            "file '".Storage::disk('videos')->path('a.mp4')."'\n"
-            ."file '".str_replace("'", "'\\''", Storage::disk('videos')->path("it's.mp4"))."'\n",
+            "file '".diskPath('videos', 'a.mp4')."'\n"
+            ."file '".str_replace("'", "'\\''", diskPath('videos', "it's.mp4"))."'\n",
         )
         ->and(array_key_first($lists))->toEndWith('/concat.txt')->not->toBeFile();
     Storage::disk('videos')->assertExists('joined.mp4');

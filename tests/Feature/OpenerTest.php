@@ -19,7 +19,7 @@ it('probes the opened file with ffprobe', function () {
         ->and($probe->duration())->toBe(120.12);
     Process::assertRan(fn ($process) => array_slice($process->command, 1) === [
         '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', '-show_chapters',
-        Storage::disk('videos')->path('movies/video.mp4'),
+        diskPath('videos', 'movies/video.mp4'),
     ]);
 });
 

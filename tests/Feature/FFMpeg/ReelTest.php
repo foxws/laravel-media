@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Storage;
 it('joins clips of one file with accurate seeks on separate inputs', function () {
     fakeProbes(['video.mp4' => videoProbe()]);
     Storage::fake('videos');
-    $path = Storage::disk('videos')->path('video.mp4');
+    $path = diskPath('videos', 'video.mp4');
 
     $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
         ->clips([Clip::make(5, 8), Clip::make(20, 24.5)])
