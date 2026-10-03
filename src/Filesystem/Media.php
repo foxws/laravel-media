@@ -1,0 +1,127 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Foxws\Media\Filesystem;
+
+use Illuminate\Support\Facades\Config;
+use Throwable;
+
+/**
+ * A file on a disk that executables can read.
+ */
+class Media
+{
+    protected ?Disk $temporaryDisk = null;
+
+    protected ?string $temporaryDirectory = null;
+
+    public function __construct(
+        protected Disk $disk,
+        protected string $path,
+        protected TemporaryDirectories $directories,
+    ) {}
+
+    public function disk(): Disk
+    {
+        return $this->disk;
+    }
+
+    public function path(): string
+    {
+        return $this->path;
+    }
+
+    public function filename(): string
+    {
+        return pathinfo($this->path, PATHINFO_BASENAME);
+    }
+
+    public function extension(): string
+    {
+        return pathinfo($this->path, PATHINFO_EXTENSION);
+    }
+
+    /**
+     * The path of the file on the local filesystem, downloading it from a
+     * remote disk to a temporary directory the first time it is needed.
+     *
+     * @throws MediaNotFoundException
+     */
+    public function localPath(): string
+    {
+        if ($this->disk->isLocal()) {
+            return $this->disk->path($this->path);
+        }
+
+        $temporaryDisk = $this->temporaryDisk();
+
+        if (! $temporaryDisk->exists($this->path)) {
+            $stream = $this->disk->readStream($this->path)
+                ?? throw MediaNotFoundException::unreadable($this->path);
+
+            $temporaryDisk->writeStream($this->path, $stream);
+
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        return $temporaryDisk->path($this->path);
+    }
+
+    /**
+     * The input executables should read: a short-lived signed URL for remote
+     * disks that support them (when enabled), otherwise a local path.
+     */
+    public function inputPath(): string
+    {
+        if (! $this->disk->isLocal()
+            && Config::boolean('media.remote_inputs.enabled', true)
+            && $this->disk->providesTemporaryUrls()
+        ) {
+            return $this->disk->temporaryUrl(
+                $this->path,
+                now()->addSeconds(Config::integer('media.remote_inputs.url_lifetime', 3600)),
+            );
+        }
+
+        return $this->localPath();
+    }
+
+    /**
+     * The size of the file in bytes, or 0 when it can't be determined.
+     */
+    public function size(): int
+    {
+        try {
+            return (int) $this->disk->size($this->path);
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    /**
+     * Delete the local copy of a remote file, if one was made.
+     */
+    public function cleanup(): void
+    {
+        if ($this->temporaryDirectory !== null) {
+            $this->directories->delete($this->temporaryDirectory);
+        }
+
+        $this->temporaryDirectory = null;
+        $this->temporaryDisk = null;
+    }
+
+    protected function temporaryDisk(): Disk
+    {
+        if ($this->temporaryDisk) {
+            return $this->temporaryDisk;
+        }
+
+        $this->temporaryDirectory = $this->directories->create($this->size());
+
+        return $this->temporaryDisk = Disk::local($this->temporaryDirectory);
+    }
+}
