@@ -49,12 +49,19 @@ class Executables
         $configured = $this->configured($executable);
 
         if (str_contains($configured, '/') || str_contains($configured, '\\')) {
-            return $this->resolved[$executable->value] = is_file($configured) && is_executable($configured)
-                ? $configured
-                : null;
+            return $this->resolved[$executable->value] = $this->isExecutableFile($configured) ? $configured : null;
         }
 
         return $this->resolved[$executable->value] = new ExecutableFinder()->find($configured, null, [base_path()]);
+    }
+
+    /**
+     * Whether the path is a file that can be run. On Windows, is_executable() only accepts
+     * real binaries, so any file counts, like Symfony's ExecutableFinder does.
+     */
+    protected function isExecutableFile(string $path): bool
+    {
+        return is_file($path) && (PHP_OS_FAMILY === 'Windows' || is_executable($path));
     }
 
     protected function configured(Executable $executable): string

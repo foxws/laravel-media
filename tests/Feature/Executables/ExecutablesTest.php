@@ -32,4 +32,12 @@ it('does not accept a configured path that is not executable', function () {
     config(['media.executables.ffprobe' => $path]);
 
     expect(Executables::make()->available(Executable::FFProbe))->toBeFalse();
-});
+})->skipOnWindows();
+
+it('accepts scripts such as .bat files on Windows', function () {
+    $path = tempnam(sys_get_temp_dir(), 'media').'.cmd';
+    touch($path);
+    config(['media.executables.ffprobe' => $path]);
+
+    expect(Executables::make()->path(Executable::FFProbe))->toBe($path);
+})->onlyOnWindows();
