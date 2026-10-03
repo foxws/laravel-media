@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Foxws\Media;
 
+use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\FFMpeg\Builder;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
-use Foxws\Media\Filesystem\MediaNotFoundException;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;

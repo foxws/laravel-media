@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Exceptions\ExecutableNotFoundException;
 use Foxws\Media\Executables\Executable;
-use Foxws\Media\Executables\ExecutableNotFoundException;
 use Foxws\Media\Executables\Executables;
 
 it('uses a configured absolute path to an executable file', function () {

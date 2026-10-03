@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
-use Foxws\Media\Filesystem\MediaNotFoundException;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 

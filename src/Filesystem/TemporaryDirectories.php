@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Filesystem;
 
+use Foxws\Media\Exceptions\InsufficientStorageException;
 use Illuminate\Filesystem\Filesystem;
 
 class TemporaryDirectories

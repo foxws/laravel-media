@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Executables;
 
 use Foxws\Media\Concerns\ResolvesFromContainer;
+use Foxws\Media\Exceptions\ExecutableNotFoundException;
 use Illuminate\Support\Facades\Config;
 use Symfony\Component\Process\ExecutableFinder;
 

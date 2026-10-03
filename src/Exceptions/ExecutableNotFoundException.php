@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Foxws\Media\Executables;
+namespace Foxws\Media\Exceptions;
 
+use Foxws\Media\Executables\Executable;
 use RuntimeException;
 
 class ExecutableNotFoundException extends RuntimeException

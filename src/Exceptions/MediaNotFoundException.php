@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Foxws\Media\Filesystem;
+namespace Foxws\Media\Exceptions;
 
 use RuntimeException;
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Filesystem;
 
+use Foxws\Media\Exceptions\MediaNotFoundException;
 use Illuminate\Support\Facades\Config;
 use Throwable;
 

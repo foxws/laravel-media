@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Process;
 
 use Foxws\Media\Concerns\ResolvesFromContainer;
+use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;

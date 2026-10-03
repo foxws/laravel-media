@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Filesystem;
 
 use Foxws\Media\Concerns\ResolvesFromContainer;
+use Foxws\Media\Exceptions\MediaNotFoundException;
 use Illuminate\Filesystem\Filesystem;
 use Symfony\Component\Finder\SplFileInfo;
 

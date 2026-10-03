@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Foxws\Media\Process;
+namespace Foxws\Media\Exceptions;
 
+use Foxws\Media\Process\Result;
 use RuntimeException;
 
 class ProcessFailedException extends RuntimeException

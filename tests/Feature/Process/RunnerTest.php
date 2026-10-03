@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
-use Foxws\Media\Process\ProcessFailedException;
 use Foxws\Media\Process\Runner;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
