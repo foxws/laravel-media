@@ -14,15 +14,15 @@ it('creates directories under the root', function () {
 
     $directory = $directories->create();
 
-    expect($directory)->toStartWith($this->root.'/')->toBeDirectory();
+    expect($directory->path())->toStartWith($this->root.'/')->toBeDirectory();
 });
 
 it('creates cache directories under the cache root, or the root when none is set', function () {
     $withCache = new TemporaryDirectories($this->root, cacheRoot: $this->root.'/cache');
     $withoutCache = new TemporaryDirectories($this->root);
 
-    expect($withCache->createCache())->toStartWith($this->root.'/cache/')
-        ->and(dirname($withoutCache->createCache()))->toBe($this->root);
+    expect($withCache->createCache()->path())->toStartWith($this->root.'/cache/')
+        ->and(dirname($withoutCache->createCache()->path()))->toBe($this->root);
 });
 
 it('fails before creating a directory when there is not enough free space', function () {
@@ -44,13 +44,13 @@ it('deletes a single directory or all of them', function () {
     $second = $directories->create();
     $third = $directories->create();
 
-    $directories->delete($first);
+    $first->delete();
 
-    expect($first)->not->toBeDirectory()
-        ->and($second)->toBeDirectory();
+    expect($first->path())->not->toBeDirectory()
+        ->and($second->path())->toBeDirectory();
 
     $directories->deleteAll();
 
-    expect($second)->not->toBeDirectory()
-        ->and($third)->not->toBeDirectory();
+    expect($second->path())->not->toBeDirectory()
+        ->and($third->path())->not->toBeDirectory();
 });

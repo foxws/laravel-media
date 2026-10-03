@@ -199,13 +199,13 @@ class Builder
         $directory = $this->directories->create();
 
         try {
-            $this->encode($directory.'/'.basename($path));
+            $this->encode($directory->path(basename($path)));
 
             $target = $this->disk();
 
-            $paths = $this->exporter->export($directory, $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility, move: true);
+            $paths = $this->exporter->export($directory->path(), $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility, move: true);
         } finally {
-            $this->directories->delete($directory);
+            $directory->delete();
         }
 
         $result = new ExportResult($target, $paths);
@@ -228,7 +228,7 @@ class Builder
         }
 
         $logDirectory = $this->directories->create();
-        $log = $logDirectory.'/ffmpeg2pass';
+        $log = $logDirectory->path('ffmpeg2pass');
 
         try {
             $this->runner->run(Executable::FFMpeg, $this->arguments(
@@ -238,7 +238,7 @@ class Builder
 
             $this->runner->run(Executable::FFMpeg, $this->arguments($output, ['-pass', '2', '-passlogfile', $log]));
         } finally {
-            $this->directories->delete($logDirectory);
+            $logDirectory->delete();
         }
     }
 
