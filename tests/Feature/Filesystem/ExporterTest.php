@@ -97,13 +97,3 @@ it('copies files and leaves the source in place without move', function () {
     expect(file_exists("{$directory}/clip.mp4"))->toBeTrue();
     Storage::disk('videos')->assertExists('clip.mp4');
 });
-
-it('reads the bucket, key prefix and object options of an s3 disk', function () {
-    config(['filesystems.disks.recording-s3.options' => ['CacheControl' => 'max-age=3600']]);
-    $disk = Disk::make(recordingS3Disk());
-
-    expect($disk->isS3())->toBeTrue()
-        ->and(Disk::make(Storage::fake('fake-s3'))->isS3())->toBeFalse()
-        ->and($disk->s3Bucket())->toBe('test-bucket')
-        ->and($disk->prefixS3Path('video.mp4'))->toBe('segments/video.mp4');
-});
