@@ -6,6 +6,8 @@ namespace Foxws\Media;
 
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\FFMpeg\Builder;
+use Foxws\Media\FFMpeg\Scene;
+use Foxws\Media\FFMpeg\SceneDetector;
 use Foxws\Media\FFMpeg\Thumbnails;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
@@ -24,6 +26,9 @@ class Opener
 
     /** @var array<string, Probe> */
     protected array $probes = [];
+
+    /** @var array<string, list<Scene>> */
+    protected array $scenes = [];
 
     public function __construct(
         protected Disk $disk,
@@ -77,15 +82,25 @@ class Opener
     }
 
     /**
+     * An opened file (the first one by default).
+     *
+     * @throws MediaNotFoundException
+     */
+    public function mediaFor(?string $path = null): Media
+    {
+        return $path !== null
+            ? ($this->media[$path] ?? throw MediaNotFoundException::unreadable($path))
+            : $this->media()[0];
+    }
+
+    /**
      * Probe an opened file (the first one by default). Results are cached on this opener.
      *
      * @throws MediaNotFoundException
      */
     public function probe(?string $path = null): Probe
     {
-        $media = $path !== null
-            ? ($this->media[$path] ?? throw MediaNotFoundException::unreadable($path))
-            : $this->media()[0];
+        $media = $this->mediaFor($path);
 
         return $this->probes[$media->path()] ??= $this->prober->probe($media);
     }
@@ -112,6 +127,23 @@ class Opener
     public function ffmpeg(): Builder
     {
         return app(Builder::class, ['opener' => $this]);
+    }
+
+    /**
+     * Find the scenes of an opened video (the first one by default), split where the
+     * picture changes by at least the threshold (0-1). Results are cached on this opener.
+     *
+     * @return list<Scene>
+     */
+    public function scenes(float $threshold = 0.3, ?string $path = null): array
+    {
+        $media = $this->mediaFor($path);
+
+        return $this->scenes[$media->path().'@'.$threshold] ??= SceneDetector::make()->detect(
+            $media,
+            $this->probe($media->path())->duration(),
+            $threshold,
+        );
     }
 
     /**

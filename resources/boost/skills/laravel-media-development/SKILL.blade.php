@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -62,6 +62,36 @@ $result->paths();  // every written path
 - `beforeSaving(fn ($builder) => ...)` can still change the command. `afterSaving(fn ($builder, $result) => ...)` runs once, only after the files are on the target disk.
 - `command('out.mp4')` returns the full command line with keys redacted, without running it.
 - Call `$media->cleanupTemporaryFiles()` in `finally` when remote inputs were downloaded, because queue workers are long-lived.
+
+## Scenes, clips and reels
+
+@boostsnippet("A reel from scenes", "php")
+use Foxws\Media\FFMpeg\Clip;
+use Foxws\Media\FFMpeg\Scene;
+
+$media = Media::fromDisk('s3')->open(['videos/a.mp4', 'videos/b.mp4']);
+
+$scenes = $media->scenes(threshold: 0.3);           // list<Scene> (start, end, score), cached per threshold
+$clips = collect($scenes)
+    ->sortByDesc('score')
+    ->take(5)
+    ->sortBy('start')
+    ->map(fn (Scene $scene) => $scene->toClip(maximumDuration: 4))
+    ->push(Clip::make(10, 14, 'videos/b.mp4'))      // clips can come from any opened file
+    ->values()
+    ->all();
+
+$media->ffmpeg()
+    ->clips($clips, width: 1080, height: 1920, fps: 30)   // vertical reel; clips are letterboxed to fit
+    ->addFilter(Fade::in(0.5), new Loudnorm)              // filters apply to the joined video
+    ->inFormat(Format::h264())
+    ->save('reels/1.mp4');
+@endboostsnippet
+
+- **`clips()` re-encodes.** Each clip is a separate input seeked with `-ss`/`-t`, so cuts are frame-accurate. Without a size, clips from several files are fitted to the first file's size. If any file has no audio, the reel is silent.
+- **`clips()` builds its own inputs and graph,** so it can't be combined with `map()`, `watermark()`, `addOutput()`, `clip()`, `frame()` or `addInputArgs()` (`InvalidFilterException`).
+- **`concat()` joins whole files without re-encoding,** using ffmpeg's concat demuxer and copying streams unless a format is set. The files must share codecs, dimensions and audio layout. Otherwise it throws `InvalidMediaException` and you should use `clips()`.
+- **`clip($from, $to)` on a single file** with `Format::copy()` starts at the keyframe before `$from`. Use a re-encoding format for exact cuts.
 
 ## Several outputs in one run
 

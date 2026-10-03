@@ -9,6 +9,7 @@ use Foxws\Media\Encoding\Format;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
+use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
@@ -54,6 +55,12 @@ class Builder
 
     /** @var list<Output> */
     protected array $outputs = [];
+
+    protected ?Reel $reel = null;
+
+    protected bool $concat = false;
+
+    protected ?TemporaryDirectory $concatDirectory = null;
 
     protected ?Disk $targetDisk = null;
 
@@ -147,6 +154,37 @@ class Builder
     }
 
     /**
+     * Join clips of the opened files into one video, e.g. a reel of highlights. Clips are
+     * re-encoded, so cuts are frame-accurate and files may differ in codec and size: they're
+     * fitted to the given size, or to the first file's size when clips come from several files.
+     * Filters apply to the joined video, and audio is dropped when a file has none.
+     *
+     * @param  list<Clip>  $clips
+     */
+    public function clips(array $clips, ?int $width = null, ?int $height = null, ?float $fps = null): static
+    {
+        if ($clips === []) {
+            throw InvalidMediaException::noClips();
+        }
+
+        $this->reel = new Reel($this->opener, $clips, $width, $height, $fps);
+
+        return $this;
+    }
+
+    /**
+     * Join the opened files end to end without re-encoding. They must share codecs and
+     * dimensions; use clips() to join files that differ. Streams are copied unless
+     * another format is set.
+     */
+    public function concat(): static
+    {
+        $this->concat = true;
+
+        return $this;
+    }
+
+    /**
      * Write another output in the same ffmpeg run, e.g. each subtitle track to its own file.
      * The callback configures its streams, format and filters.
      *
@@ -216,10 +254,16 @@ class Builder
      */
     public function arguments(?string $output, array $passArguments = [], ?TemporaryDirectory $directory = null): array
     {
-        $inputs = array_merge(...array_map(
-            fn (Media $media): array => [...$this->inputArguments, '-i', $media->inputPath()],
-            $this->opener->media(),
-        ));
+        $inputs = match (true) {
+            $this->reel !== null => $this->reel->inputs(),
+            $this->concat => [...$this->inputArguments, ...$this->concatInput()],
+            default => array_merge(...array_map(
+                fn (Media $media): array => [...$this->inputArguments, '-i', $media->inputPath()],
+                $this->opener->media(),
+            )),
+        };
+
+        $format = $this->format ?? ($this->concat ? Format::copy() : null);
 
         $outputs = array_merge(...array_map(
             fn (Output $extra): array => $extra->toArguments($directory?->path($extra->path) ?? $extra->path),
@@ -235,7 +279,7 @@ class Builder
             ...($this->watermark !== null ? ['-i', $this->watermark->inputPath()] : []),
             ...($output !== null ? [
                 ...$this->filterArguments(),
-                ...($this->format?->toArguments() ?? []),
+                ...($format?->toArguments() ?? []),
                 ...$this->arguments,
                 ...$passArguments,
                 $output,
@@ -254,6 +298,14 @@ class Builder
      */
     protected function filterArguments(): array
     {
+        $reel = $this->reel;
+
+        if ($reel !== null) {
+            $this->ensureReelIsAlone();
+
+            return $reel->arguments($this->filters);
+        }
+
         if ($this->watermark === null) {
             return [...$this->maps, ...FilterChain::arguments($this->filters)];
         }
@@ -269,7 +321,7 @@ class Builder
         $video = FilterChain::of($this->filters, FilterType::Video);
         $audio = FilterChain::of($this->filters, FilterType::Audio);
 
-        $watermarkInput = count($this->opener->media());
+        $watermarkInput = $this->concat ? 1 : count($this->opener->media());
 
         $graph = sprintf(
             '[0:v]%s[base];[%d:v]%s[v]',
@@ -329,6 +381,8 @@ class Builder
         } finally {
             $directory->delete();
             $this->watermark?->cleanup();
+            $this->concatDirectory?->delete();
+            $this->concatDirectory = null;
         }
 
         $paths = array_values(array_unique([...array_map(fn (string $file): string => ltrim($file, '/'), $declared), ...$written]));
@@ -338,6 +392,71 @@ class Builder
         $this->runAfterSavingCallbacks($result);
 
         return $result;
+    }
+
+    /**
+     * The concat demuxer input: a list file of the opened files, after checking they can be joined without re-encoding.
+     *
+     * @return list<string>
+     *
+     * @throws InvalidMediaException
+     */
+    protected function concatInput(): array
+    {
+        $this->ensureConcatenable();
+
+        $this->concatDirectory ??= $this->directories->createCache();
+
+        $list = implode("\n", array_map(
+            fn (Media $media): string => "file '".str_replace("'", "'\\''", $media->inputPath())."'",
+            $this->opener->media(),
+        ))."\n";
+
+        file_put_contents($this->concatDirectory->path('concat.txt'), $list);
+
+        return [
+            '-f', 'concat',
+            '-safe', '0',
+            '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+            '-i', $this->concatDirectory->path('concat.txt'),
+        ];
+    }
+
+    /**
+     * @throws InvalidMediaException
+     */
+    protected function ensureConcatenable(): void
+    {
+        $signatures = array_map(function (string $path): string {
+            $probe = $this->opener->probe($path);
+            $video = $probe->videoStream();
+            $audio = $probe->audioStream();
+
+            return implode('|', [$video?->codecName, $video?->width, $video?->height, $audio?->codecName, $audio?->sampleRate, $audio?->channels]);
+        }, $this->opener->paths());
+
+        if (count(array_unique($signatures)) > 1) {
+            throw InvalidMediaException::notConcatenable($this->opener->paths());
+        }
+    }
+
+    /**
+     * @throws InvalidFilterException
+     */
+    protected function ensureReelIsAlone(): void
+    {
+        $conflict = match (true) {
+            $this->maps !== [] => 'map()',
+            $this->watermark !== null => 'watermark()',
+            $this->outputs !== [] => 'addOutput()',
+            $this->concat => 'concat()',
+            $this->inputArguments !== [] => 'clip(), frame() or addInputArgs()',
+            default => null,
+        };
+
+        if ($conflict !== null) {
+            throw InvalidFilterException::clipsWith($conflict);
+        }
     }
 
     /**

@@ -12,6 +12,8 @@ use Foxws\Media\Tests\TestCase;
 use GuzzleHttp\Promise\Create;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\Filesystem as Flysystem;
 use League\Flysystem\Local\LocalFilesystemAdapter;
@@ -106,4 +108,39 @@ function directoryWith(array $files): string
     }
 
     return $directory;
+}
+
+/**
+ * Fake ffprobe with probe data per input file name, and ffmpeg with the given output.
+ *
+ * @param  array<string, array<string, mixed>>  $probes  ffprobe output keyed by the input's file name.
+ */
+function fakeProbes(array $probes, string $ffmpegOutput = ''): void
+{
+    fakeExecutable(Executable::FFProbe);
+    fakeExecutable(Executable::FFMpeg);
+
+    Process::fake(['*' => function (PendingProcess $process) use ($probes, $ffmpegOutput) {
+        if (! str_ends_with($process->command[0], 'ffprobe')) {
+            return Process::result(output: $ffmpegOutput);
+        }
+
+        return Process::result(output: (string) json_encode($probes[basename(end($process->command))] ?? []));
+    }]);
+}
+
+/**
+ * ffprobe output for a video with the given properties.
+ *
+ * @return array<string, mixed>
+ */
+function videoProbe(int $width = 1920, int $height = 1080, bool $audio = true, string $codec = 'h264', float $duration = 60): array
+{
+    return [
+        'streams' => array_values(array_filter([
+            ['index' => 0, 'codec_type' => 'video', 'codec_name' => $codec, 'width' => $width, 'height' => $height],
+            $audio ? ['index' => 1, 'codec_type' => 'audio', 'codec_name' => 'aac', 'sample_rate' => '48000', 'channels' => 2] : null,
+        ])),
+        'format' => ['duration' => (string) $duration],
+    ];
 }
