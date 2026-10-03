@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, several outputs in one run, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, clips, frames, subtitle extraction, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -87,6 +87,29 @@ $result->paths();             // in the order they were declared
 - `save('main.mp4')` writes the builder's own output first, followed by the added ones. Relative paths, including folders, are kept on the target disk.
 - Two-pass encoding and `watermark()` only work with a single output, and throw when combined with `addOutput()`.
 - `save()` without a path and without added outputs throws `MediaNotFoundException`.
+
+## Thumbnail sprites and WebVTT
+
+`thumbnails()` samples the first opened video into sprite sheets plus a WebVTT file whose cues point at each tile (`sheet.jpg#xywh=x,y,w,h`). Players use it for seek previews.
+
+@boostsnippet("Seek preview thumbnails", "php")
+$result = Media::fromDisk('s3')->open('videos/movie.mp4')->thumbnails()
+    ->every(10)                       // or ->count(100, minimumInterval: 5); the default is about 100 thumbnails, at least 1s apart
+    ->size(160, 90)                   // letterboxed, keeps the aspect ratio
+    ->grid(10, 10)                    // per sheet; more thumbnails continue on the next sheet
+    ->format('webp', quality: 75)     // or 'jpg' (the default)
+    ->toDisk('storyboards')
+    ->withUrl(fn (string $sprite) => Storage::disk('storyboards')->url($sprite))   // optional
+    ->save("{$movie->id}/storyboard");
+
+$result->sprites;   // ["1/storyboard_001.webp", ...]
+$result->vtt;       // "1/storyboard.vtt"
+$result->interval;  // seconds between thumbnails
+@endboostsnippet
+
+- It's one ffmpeg run with time-based sampling (`fps`), so it doesn't depend on the frame rate.
+- Without `withUrl()`, cues use the sheet's file name relative to the VTT file, so keep them together.
+- Media without a video stream or a known duration throws `InvalidMediaException`. `beforeSaving()`/`afterSaving()` are available, and `afterSaving` receives the `ThumbnailsResult`.
 
 ## Filters
 

@@ -11,4 +11,5 @@ enum VideoCodec: string
     case Hevc = 'libx265';
     case Av1 = 'libsvtav1';
     case Vp9 = 'libvpx-vp9';
+    case WebP = 'libwebp';
 }

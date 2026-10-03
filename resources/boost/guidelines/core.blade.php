@@ -8,4 +8,4 @@ This application uses `foxws/laravel-media` to probe and process audio and video
 - Call `cleanupTemporaryFiles()` on the opener in `finally` in queued jobs, because workers are long-lived.
 - In tests, fake processes with `Process::fake()` and disks with `Storage::fake()`; never run the real executables.
 
-When probing media, extracting frames or subtitles, encoding, clipping or exporting results to disks, invoke `laravel-media-development` for detailed rules.
+When probing media, extracting frames, subtitles or thumbnail sprites, encoding, clipping or exporting results to disks, invoke `laravel-media-development` for detailed rules.
