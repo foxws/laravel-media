@@ -76,3 +76,15 @@ it('hides encryption keys in the command it reports', function () {
         return true;
     });
 });
+
+it('streams standard output to the output callback', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Process::fake(['*' => Process::result(output: "first\nsecond\n", errorOutput: 'warning')]);
+    $output = '';
+
+    Runner::make()->run(Executable::FFMpeg, ['-version'], onOutput: function (string $chunk) use (&$output) {
+        $output .= $chunk;
+    });
+
+    expect($output)->toContain('first')->toContain('second')->not->toContain('warning');
+});

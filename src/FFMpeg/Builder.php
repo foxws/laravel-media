@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\FFMpeg;
 
 use Foxws\Media\Concerns\HasSaveCallbacks;
+use Foxws\Media\Concerns\ReportsProgress;
 use Foxws\Media\Encoding\Format;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Exceptions\InvalidFilterException;
@@ -27,6 +28,7 @@ use Foxws\Media\Opener;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Traits\Conditionable;
+use Throwable;
 
 /**
  * Builds and runs an ffmpeg command with the opened media as inputs.
@@ -35,6 +37,7 @@ class Builder
 {
     use Conditionable;
     use HasSaveCallbacks;
+    use ReportsProgress;
 
     /** @var list<string> */
     protected array $inputArguments = [];
@@ -61,6 +64,11 @@ class Builder
 
     protected bool $concat = false;
 
+    /** @var array{from: float, to: float|null}|null */
+    protected ?array $clipped = null;
+
+    protected bool $singleFrame = false;
+
     protected ?TemporaryDirectory $concatDirectory = null;
 
     protected ?Disk $targetDisk = null;
@@ -81,6 +89,7 @@ class Builder
     public function clip(float $from, ?float $to = null): static
     {
         $this->inputArguments = [...$this->inputArguments, '-ss', $this->seconds($from)];
+        $this->clipped = ['from' => $from, 'to' => $to];
 
         if ($to !== null) {
             $this->inputArguments = [...$this->inputArguments, '-t', $this->seconds(max(0.0, $to - $from))];
@@ -97,6 +106,7 @@ class Builder
         $this->inputArguments = [...$this->inputArguments, '-ss', $this->seconds($at)];
         $this->arguments = [...$this->arguments, '-frames:v', '1'];
         $this->format ??= Format::jpeg();
+        $this->singleFrame = true;
 
         return $this;
     }
@@ -478,7 +488,7 @@ class Builder
     protected function encode(?string $output, TemporaryDirectory $directory): void
     {
         if ($output === null || $this->format?->passes !== 2) {
-            $this->runner->run(Executable::FFMpeg, $this->arguments($output, directory: $directory));
+            $this->run($this->arguments($output, directory: $directory));
 
             return;
         }
@@ -487,15 +497,71 @@ class Builder
         $log = $logDirectory->path('ffmpeg2pass');
 
         try {
-            $this->runner->run(Executable::FFMpeg, $this->arguments(
+            $this->run($this->arguments(
                 PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null',
                 ['-pass', '1', '-passlogfile', $log, '-an', '-f', 'null'],
-            ));
+            ), pass: 1, passes: 2);
 
-            $this->runner->run(Executable::FFMpeg, $this->arguments($output, ['-pass', '2', '-passlogfile', $log]));
+            $this->run($this->arguments($output, ['-pass', '2', '-passlogfile', $log]), pass: 2, passes: 2);
         } finally {
             $logDirectory->delete();
         }
+    }
+
+    /**
+     * Run ffmpeg, streaming its progress to the progress callbacks when there are any.
+     *
+     * @param  list<string>  $arguments
+     */
+    protected function run(array $arguments, int $pass = 1, int $passes = 1): void
+    {
+        if (! $this->reportsProgress()) {
+            $this->runner->run(Executable::FFMpeg, $arguments);
+
+            return;
+        }
+
+        $parser = new FFMpegProgressParser($this->expectedDuration());
+
+        $this->runner->run(
+            Executable::FFMpeg,
+            ['-progress', 'pipe:1', '-nostats', ...$arguments],
+            onOutput: function (string $output) use ($parser, $pass, $passes): void {
+                foreach ($parser->feed($output) as $progress) {
+                    $this->reportProgress($progress->forPass($pass, $passes));
+                }
+            },
+        );
+    }
+
+    /**
+     * The seconds of media this run will process, used to turn ffmpeg's position into a percentage.
+     */
+    public function expectedDuration(): ?float
+    {
+        if ($this->singleFrame) {
+            return null;
+        }
+
+        if ($this->reel !== null) {
+            return $this->reel->duration();
+        }
+
+        try {
+            $duration = $this->concat
+                ? array_sum(array_map(fn (string $path): float => $this->opener->probe($path)->duration(), $this->opener->paths()))
+                : $this->opener->probe()->duration();
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($this->clipped !== null) {
+            $end = $this->clipped['to'] !== null ? min($this->clipped['to'], $duration) : $duration;
+
+            return max(0.0, $end - $this->clipped['from']);
+        }
+
+        return $duration > 0 ? $duration : null;
     }
 
     /**
