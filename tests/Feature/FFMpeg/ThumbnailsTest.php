@@ -1,0 +1,139 @@
+<?php
+
+declare(strict_types=1);
+
+use Foxws\Media\Exceptions\InvalidMediaException;
+use Foxws\Media\Executables\Executable;
+use Foxws\Media\Facades\Media;
+use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Storage;
+
+/**
+ * Fake ffprobe with a video of the given duration, and ffmpeg writing the number of sheets it was asked for.
+ */
+function fakeThumbnailProcesses(float $duration, bool $video = true): void
+{
+    fakeExecutable(Executable::FFProbe);
+    fakeExecutable(Executable::FFMpeg);
+
+    Process::fake(['*' => function (PendingProcess $process) use ($duration, $video) {
+        if (str_ends_with($process->command[0], 'ffprobe')) {
+            return Process::result(output: json_encode([
+                'streams' => $video ? [['index' => 0, 'codec_type' => 'video', 'codec_name' => 'h264']] : [],
+                'format' => ['duration' => (string) $duration],
+            ]));
+        }
+
+        $sheets = (int) $process->command[array_search('-frames:v', $process->command, true) + 1];
+
+        foreach (range(1, $sheets) as $sheet) {
+            file_put_contents(sprintf(end($process->command), $sheet), 'sheet');
+        }
+
+        return Process::result();
+    }]);
+}
+
+it('samples the video into sprite sheets with a webvtt file', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+    Storage::fake('storyboards');
+
+    $result = Media::fromDisk('videos')->open('video.mp4')->thumbnails()
+        ->every(10)
+        ->toDisk('storyboards')
+        ->save('1/storyboard');
+
+    expect($result->sprites)->toBe(['1/storyboard_001.jpg'])
+        ->and($result->vtt)->toBe('1/storyboard.vtt')
+        ->and($result->interval)->toBe(10.0)
+        ->and($result->count)->toBe(3);
+    expect(Storage::disk('storyboards')->get('1/storyboard.vtt'))->toBe(<<<'VTT'
+        WEBVTT
+
+        00:00:00.000 --> 00:00:10.000
+        storyboard_001.jpg#xywh=0,0,160,90
+
+        00:00:10.000 --> 00:00:20.000
+        storyboard_001.jpg#xywh=160,0,160,90
+
+        00:00:20.000 --> 00:00:25.000
+        storyboard_001.jpg#xywh=320,0,160,90
+
+        VTT);
+});
+
+it('runs ffmpeg once with time based sampling, letterboxed tiles and the sheet count', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->size(320, 180)->grid(5, 4)->save('storyboard');
+
+    Process::assertRan(fn ($process) => str_ends_with($process->command[0], 'ffmpeg')
+        && array_slice($process->command, 8, -1) === [
+            '-map', '0:v:0',
+            '-vf', 'fps=1/10,scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tile=5x4',
+            '-an', '-sn', '-q:v', '4', '-frames:v', '1', '-f', 'image2',
+        ]
+        && str_ends_with(end($process->command), '/storyboard_%03d.jpg'));
+});
+
+it('continues on the next sheet when the grid is full', function () {
+    fakeThumbnailProcesses(duration: 60);
+    Storage::fake('videos');
+
+    $result = Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->grid(2, 2)->save('storyboard');
+
+    $vtt = Storage::disk('videos')->get('storyboard.vtt');
+
+    expect($result->sprites)->toBe(['storyboard_001.jpg', 'storyboard_002.jpg'])
+        ->and($result->count)->toBe(6)
+        ->and($vtt)->toContain("00:00:30.000 --> 00:00:40.000\nstoryboard_001.jpg#xywh=160,90,160,90")
+        ->and($vtt)->toContain("00:00:40.000 --> 00:00:50.000\nstoryboard_002.jpg#xywh=0,0,160,90");
+});
+
+it('spreads a number of thumbnails over the video, but not closer than the minimum interval', function () {
+    fakeThumbnailProcesses(duration: 3600);
+    Storage::fake('videos');
+    $thumbnails = Media::fromDisk('videos')->open('video.mp4')->thumbnails();
+
+    expect($thumbnails->interval(3600))->toBe(36.0)
+        ->and($thumbnails->count(10)->interval(3600))->toBe(360.0)
+        ->and($thumbnails->count(100, minimumInterval: 5)->interval(60))->toBe(5.0);
+});
+
+it('writes webp sheets and resolves cue urls', function () {
+    fakeThumbnailProcesses(duration: 5);
+    Storage::fake('videos');
+
+    $result = Media::fromDisk('videos')->open('video.mp4')->thumbnails()
+        ->every(5)
+        ->format('webp', quality: 70)
+        ->withUrl(fn (string $sprite) => "https://cdn.test/{$sprite}")
+        ->save('storyboard');
+
+    expect($result->sprites)->toBe(['storyboard_001.webp'])
+        ->and(Storage::disk('videos')->get('storyboard.vtt'))->toContain('https://cdn.test/storyboard_001.webp#xywh=0,0,160,90');
+    Process::assertRan(fn ($process) => in_array('libwebp', $process->command, true) && in_array('70', $process->command, true));
+});
+
+it('fails for media without a video stream or duration', function (float $duration, bool $video, string $message) {
+    fakeThumbnailProcesses($duration, $video);
+    Storage::fake('videos');
+
+    expect(fn () => Media::fromDisk('videos')->open('song.mp3')->thumbnails()->save('storyboard'))
+        ->toThrow(InvalidMediaException::class, $message);
+})->with([
+    'no video' => [120, false, 'song.mp3 has no video stream.'],
+    'no duration' => [0, true, 'The duration of song.mp3 is unknown'],
+]);
+
+it('rejects unsupported sheet formats and intervals', function () {
+    Storage::fake('videos');
+    $thumbnails = Media::fromDisk('videos')->open('video.mp4')->thumbnails();
+
+    expect(fn () => $thumbnails->format('png'))->toThrow(InvalidArgumentException::class, 'jpg or webp, not [png]')
+        ->and(fn () => $thumbnails->every(0))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => $thumbnails->count(0))->toThrow(InvalidArgumentException::class);
+});

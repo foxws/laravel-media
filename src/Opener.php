@@ -6,6 +6,7 @@ namespace Foxws\Media;
 
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\FFMpeg\Builder;
+use Foxws\Media\FFMpeg\Thumbnails;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
@@ -111,6 +112,14 @@ class Opener
     public function ffmpeg(): Builder
     {
         return app(Builder::class, ['opener' => $this]);
+    }
+
+    /**
+     * Sample the first opened video into thumbnail sprite sheets with a WebVTT file.
+     */
+    public function thumbnails(): Thumbnails
+    {
+        return new Thumbnails($this);
     }
 
     /**
