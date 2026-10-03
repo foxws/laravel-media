@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
@@ -168,3 +169,47 @@ it('does not run after saving callbacks when ffmpeg fails', function () {
 
     expect($called)->toBeFalse();
 });
+
+it('encodes in two passes with a shared log file outside the output', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->inFormat(Format::h264()->bitrate(2000)->twoPass())
+        ->save('encoded.mp4');
+
+    Process::assertRanTimes(fn () => true, 2);
+    Process::assertRan(function ($process): bool {
+        $passArguments = array_slice($process->command, -8, 7);
+
+        return $passArguments[0] === '-pass' && $passArguments[1] === '1'
+            && array_slice($passArguments, 4) === ['-an', '-f', 'null']
+            && end($process->command) === '/dev/null';
+    });
+    Process::assertRan(fn ($process) => array_slice($process->command, -5, 2) === ['-pass', '2']
+        && str_ends_with(end($process->command), '/encoded.mp4'));
+    Storage::disk('videos')->assertExists('encoded.mp4');
+    Storage::disk('videos')->assertMissing('ffmpeg2pass-0.log');
+});
+
+it('rejects two-pass encoding for codecs that do not support it', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    Process::fake();
+
+    expect(fn () => Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->inFormat(Format::av1()->bitrate(2000)->twoPass())
+        ->save('encoded.mp4'))
+        ->toThrow(InvalidFormatException::class, 'Two-pass encoding is supported for libx264 and libvpx-vp9, not [libsvtav1].');
+
+    Process::assertNothingRan();
+});
+
+it('rejects two-pass encoding without a target bitrate', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    Process::fake();
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->inFormat(Format::h264()->twoPass())->save('encoded.mp4');
+})->throws(InvalidFormatException::class, 'Two-pass encoding needs a target bitrate.');

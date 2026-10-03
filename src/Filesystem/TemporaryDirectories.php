@@ -9,7 +9,7 @@ use Illuminate\Filesystem\Filesystem;
 
 class TemporaryDirectories
 {
-    /** @var list<string> */
+    /** @var array<string, TemporaryDirectory> */
     protected array $directories = [];
 
     public function __construct(
@@ -24,14 +24,14 @@ class TemporaryDirectories
     }
 
     /**
-     * Create a new temporary directory and return its full path.
+     * Create a new temporary directory.
      *
      * @param  int  $expectedBytes  Combined size of the job's input files, if known, to check
      *                              there is room for the output on top of the minimum free space.
      *
      * @throws InsufficientStorageException
      */
-    public function create(int $expectedBytes = 0): string
+    public function create(int $expectedBytes = 0): TemporaryDirectory
     {
         $requiredBytes = $expectedBytes > 0 ? (int) ceil($expectedBytes * $this->sizeMultiplier) : 0;
 
@@ -46,7 +46,7 @@ class TemporaryDirectories
      *
      * @throws InsufficientStorageException
      */
-    public function createCache(): string
+    public function createCache(): TemporaryDirectory
     {
         $root = $this->cacheRoot ?? $this->root;
 
@@ -55,29 +55,29 @@ class TemporaryDirectories
         return $this->makeDirectory($root);
     }
 
-    public function delete(string $directory): void
+    public function delete(TemporaryDirectory $directory): void
     {
-        new Filesystem()->deleteDirectory($directory);
+        new Filesystem()->deleteDirectory($directory->path());
 
-        $this->directories = array_values(array_diff($this->directories, [$directory]));
+        unset($this->directories[$directory->path()]);
     }
 
     public function deleteAll(): void
     {
         foreach ($this->directories as $directory) {
-            new Filesystem()->deleteDirectory($directory);
+            new Filesystem()->deleteDirectory($directory->path());
         }
 
         $this->directories = [];
     }
 
-    protected function makeDirectory(string $root): string
+    protected function makeDirectory(string $root): TemporaryDirectory
     {
-        $directory = $root.'/'.bin2hex(random_bytes(8));
+        $path = $root.'/'.bin2hex(random_bytes(8));
 
-        mkdir($directory, 0777, true);
+        mkdir($path, 0777, true);
 
-        return $this->directories[] = $directory;
+        return $this->directories[$path] = new TemporaryDirectory($path, $this);
     }
 
     /**

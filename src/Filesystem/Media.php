@@ -15,7 +15,7 @@ class Media
 {
     protected ?Disk $temporaryDisk = null;
 
-    protected ?string $temporaryDirectory = null;
+    protected ?TemporaryDirectory $temporaryDirectory = null;
 
     public function __construct(
         protected Disk $disk,
@@ -107,9 +107,7 @@ class Media
      */
     public function cleanup(): void
     {
-        if ($this->temporaryDirectory !== null) {
-            $this->directories->delete($this->temporaryDirectory);
-        }
+        $this->temporaryDirectory?->delete();
 
         $this->temporaryDirectory = null;
         $this->temporaryDisk = null;
@@ -123,6 +121,6 @@ class Media
 
         $this->temporaryDirectory = $this->directories->create($this->size());
 
-        return $this->temporaryDisk = Disk::local($this->temporaryDirectory);
+        return $this->temporaryDisk = Disk::local($this->temporaryDirectory->path());
     }
 }

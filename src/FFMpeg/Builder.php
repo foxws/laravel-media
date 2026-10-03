@@ -6,6 +6,8 @@ namespace Foxws\Media\FFMpeg;
 
 use Foxws\Media\Concerns\HasSaveCallbacks;
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\VideoCodec;
+use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
@@ -150,9 +152,10 @@ class Builder
     /**
      * The ffmpeg arguments for writing to the given output path.
      *
+     * @param  list<string>  $passArguments  Arguments for one pass of a two-pass encode.
      * @return list<string>
      */
-    public function arguments(string $output): array
+    public function arguments(string $output, array $passArguments = []): array
     {
         $inputs = array_merge(...array_map(
             fn (Media $media): array => [...$this->inputArguments, '-i', $media->inputPath()],
@@ -168,12 +171,14 @@ class Builder
             ...$this->maps,
             ...($this->format?->toArguments() ?? []),
             ...$this->arguments,
+            ...$passArguments,
             $output,
         ];
     }
 
     /**
      * The full command line for writing to the given output path, with sensitive values redacted.
+     * For a two-pass format, this is the command of the final pass without its pass options.
      */
     public function command(string $output): string
     {
@@ -182,21 +187,25 @@ class Builder
 
     /**
      * Run ffmpeg and save the output to the target disk.
+     *
+     * @throws InvalidFormatException
      */
     public function save(string $path): ExportResult
     {
+        $this->ensureValidPasses();
+
         $this->runBeforeSavingCallbacks();
 
         $directory = $this->directories->create();
 
         try {
-            $this->runner->run(Executable::FFMpeg, $this->arguments($directory.'/'.basename($path)));
+            $this->encode($directory->path(basename($path)));
 
             $target = $this->disk();
 
-            $paths = $this->exporter->export($directory, $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility, move: true);
+            $paths = $this->exporter->export($directory->path(), $target, dirname($path) === '.' ? '' : dirname($path), $this->visibility, move: true);
         } finally {
-            $this->directories->delete($directory);
+            $directory->delete();
         }
 
         $result = new ExportResult($target, $paths);
@@ -204,6 +213,51 @@ class Builder
         $this->runAfterSavingCallbacks($result);
 
         return $result;
+    }
+
+    /**
+     * Run ffmpeg once, or twice for a two-pass format: the first pass only analyses
+     * the video into a log file, kept outside the output directory.
+     */
+    protected function encode(string $output): void
+    {
+        if ($this->format?->passes !== 2) {
+            $this->runner->run(Executable::FFMpeg, $this->arguments($output));
+
+            return;
+        }
+
+        $logDirectory = $this->directories->create();
+        $log = $logDirectory->path('ffmpeg2pass');
+
+        try {
+            $this->runner->run(Executable::FFMpeg, $this->arguments(
+                PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null',
+                ['-pass', '1', '-passlogfile', $log, '-an', '-f', 'null'],
+            ));
+
+            $this->runner->run(Executable::FFMpeg, $this->arguments($output, ['-pass', '2', '-passlogfile', $log]));
+        } finally {
+            $logDirectory->delete();
+        }
+    }
+
+    /**
+     * @throws InvalidFormatException
+     */
+    protected function ensureValidPasses(): void
+    {
+        if ($this->format?->passes !== 2) {
+            return;
+        }
+
+        if ($this->format->withoutVideo || ! in_array($this->format->videoCodec, [VideoCodec::H264, VideoCodec::Vp9], true)) {
+            throw InvalidFormatException::twoPassUnsupported($this->format->withoutVideo ? null : $this->format->videoCodec);
+        }
+
+        if ($this->format->videoBitrate === null) {
+            throw InvalidFormatException::twoPassWithoutBitrate();
+        }
     }
 
     protected function seconds(float $seconds): string

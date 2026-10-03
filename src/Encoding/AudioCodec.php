@@ -10,4 +10,5 @@ enum AudioCodec: string
     case Aac = 'aac';
     case Opus = 'libopus';
     case Mp3 = 'libmp3lame';
+    case Flac = 'flac';
 }
