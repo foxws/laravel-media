@@ -92,6 +92,7 @@ it('continues on the next sheet when the grid is full', function () {
 
     expect($result->sprites)->toBe(['storyboard_001.jpg', 'storyboard_002.jpg'])
         ->and($result->count)->toBe(6)
+        ->and([$result->columns, $result->rows, $result->width, $result->height])->toBe([2, 2, 160, 90])
         ->and($vtt)->toContain("00:00:30.000 --> 00:00:40.000\nstoryboard_001.jpg#xywh=160,90,160,90")
         ->and($vtt)->toContain("00:00:40.000 --> 00:00:50.000\nstoryboard_002.jpg#xywh=0,0,160,90");
 });
