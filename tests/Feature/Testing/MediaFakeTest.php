@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Exceptions\FailureReason;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
@@ -147,4 +148,14 @@ it('returns the fake, which records the commands', function () {
     expect($fake)->toBeInstanceOf(MediaFake::class)
         ->and($fake->commands(Executable::FFProbe))->toHaveCount(1)
         ->and($fake->commands(Executable::FFMpeg))->toBe([]);
+});
+
+it('cancels from a progress callback like a real run', function () {
+    Media::fake();
+    Storage::fake('media');
+
+    $save = fn () => Media::fromDisk('media')->open('video.mp4')->ffmpeg()->onProgress(fn () => false)->save('out.mp4');
+
+    expect($save)->toThrow(fn (ProcessFailedException $exception) => expect($exception->reason)->toBe(FailureReason::Cancelled));
+    Media::assertNotSaved('out.mp4', 'media');
 });

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Exceptions\FailureReason;
+use Foxws\Media\Exceptions\ProcessCancelledException;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
@@ -173,3 +174,36 @@ it('stops a running process, as when a queue job times out', function () {
 
     expect(microtime(true) - $startedAt)->toBeLessThan(5);
 })->skip(! function_exists('pcntl_alarm'), 'Needs pcntl to send an alarm while the process runs.')->skipOnWindows();
+
+it('stops a running process that is cancelled from its output callback', function () {
+    $script = sys_get_temp_dir().'/laravel-media-progressing-ffmpeg';
+    file_put_contents($script, "#!/bin/sh\necho 'progress=continue'\nsleep 10\n");
+    chmod($script, 0755);
+    config(['media.executables.ffmpeg' => $script]);
+    app(Executables::class)->flush();
+    $startedAt = microtime(true);
+
+    expect(fn () => Runner::make()->run(Executable::FFMpeg, [], onOutput: fn () => throw ProcessCancelledException::make()))
+        ->toThrow(fn (ProcessFailedException $exception) => expect($exception)
+            ->reason->toBe(FailureReason::Cancelled)
+            ->getMessage()->toBe('ffmpeg was cancelled.'));
+
+    expect(microtime(true) - $startedAt)->toBeLessThan(5);
+})->skipOnWindows();
+
+it('passes on output written as soon as the process starts', function () {
+    $script = sys_get_temp_dir().'/laravel-media-quick-ffmpeg';
+    file_put_contents($script, "#!/bin/sh\necho 'progress=end'\n");
+    chmod($script, 0755);
+    config(['media.executables.ffmpeg' => $script]);
+    app(Executables::class)->flush();
+    $output = '';
+
+    foreach (range(1, 5) as $run) {
+        Runner::make()->run(Executable::FFMpeg, [], onOutput: function (string $chunk) use (&$output) {
+            $output .= $chunk;
+        });
+    }
+
+    expect(substr_count($output, 'progress=end'))->toBe(5);
+})->skipOnWindows();

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Concerns;
 
+use Foxws\Media\Events\ProgressReported;
 use Foxws\Media\Process\Progress;
+use Illuminate\Support\Facades\Event;
 
 trait ReportsProgress
 {
@@ -13,6 +15,8 @@ trait ReportsProgress
 
     /**
      * Receive progress updates while the process runs, about twice a second.
+     * Return false from the callback to cancel: the process is stopped and a
+     * ProcessFailedException with reason Cancelled is thrown.
      *
      * @param  callable(Progress): mixed  $callback
      */
@@ -25,13 +29,22 @@ trait ReportsProgress
 
     protected function reportsProgress(): bool
     {
-        return $this->progressCallbacks !== [];
+        return $this->progressCallbacks !== [] || Event::hasListeners(ProgressReported::class);
     }
 
-    protected function reportProgress(Progress $progress): void
+    /**
+     * Pass the progress to the callbacks. Returns false when one of them asked to cancel.
+     */
+    protected function reportProgress(Progress $progress): bool
     {
+        $continue = true;
+
         foreach ($this->progressCallbacks as $callback) {
-            $callback($progress);
+            if ($callback($progress) === false) {
+                $continue = false;
+            }
         }
+
+        return $continue;
     }
 }

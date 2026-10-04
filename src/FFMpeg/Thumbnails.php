@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\FFMpeg;
 
 use Closure;
+use Foxws\Media\Concerns\HasContext;
 use Foxws\Media\Concerns\HasSaveCallbacks;
 use Foxws\Media\Concerns\ReportsProgress;
 use Foxws\Media\Encoding\Format;
@@ -25,6 +26,7 @@ use InvalidArgumentException;
  */
 class Thumbnails
 {
+    use HasContext;
     use HasSaveCallbacks;
     use ReportsProgress;
 
@@ -222,6 +224,7 @@ class Thumbnails
             ->inFormat($this->sheetFormat($sheets))
             ->toDisk($this->disk())
             ->when($this->visibility !== null, fn (Builder $builder) => $builder->withVisibility((string) $this->visibility))
+            ->withContext($this->context)
             ->when($this->timeout !== null, fn (Builder $builder) => $builder->timeout((int) $this->timeout))
             ->when($this->reportsProgress(), fn (Builder $builder) => $builder->onProgress($this->reportProgress(...)))
             ->save("{$name}_%03d.{$this->extension}");

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Process;
 
 use Foxws\Media\Concerns\ResolvesFromContainer;
+use Foxws\Media\Exceptions\ProcessCancelledException;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
@@ -17,6 +18,7 @@ use Illuminate\Process\InvokedProcess;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 class Runner
 {
@@ -31,6 +33,15 @@ class Runner
 
     /** @var array<int, \Illuminate\Contracts\Process\InvokedProcess> */
     protected array $running = [];
+
+    /**
+     * Runs whose output is still passed on, keyed by run; removed when a run is being stopped.
+     *
+     * @var array<int, true>
+     */
+    protected array $streaming = [];
+
+    protected int $runs = 0;
 
     public function __construct(
         protected Executables $executables,
@@ -63,6 +74,10 @@ class Runner
 
         try {
             [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $onOutput);
+        } catch (ProcessCancelledException) {
+            $this->fail(ProcessFailedException::cancelled(
+                new Result($executable, $redacted, 130, '', '', (hrtime(true) - $startedAt) / 1e9),
+            ));
         } catch (ProcessTimedOutException $exception) {
             $this->fail(ProcessFailedException::timedOut(
                 new Result($executable, $redacted, 124, $exception->result->output(), $exception->result->errorOutput(), (hrtime(true) - $startedAt) / 1e9),
@@ -118,18 +133,29 @@ class Runner
      */
     protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
     {
-        $process = Process::timeout($timeout)->start($command);
+        $id = ++$this->runs;
+        $this->streaming[$id] = true;
 
-        $this->running[spl_object_id($process)] = $process;
+        // The callback goes to start(), because Symfony already reads available
+        // output when starting, which a callback passed to wait() would miss.
+        $process = Process::timeout($timeout)->start($command, function (string $type, string $output) use ($onOutput, $id): void {
+            if ($type === 'out' && $onOutput !== null && isset($this->streaming[$id])) {
+                $onOutput($output);
+            }
+        });
+
+        $this->running[$id] = $process;
 
         try {
-            $result = $process->wait(function (string $type, string $output) use ($onOutput): void {
-                if ($type === 'out' && $onOutput !== null) {
-                    $onOutput($output);
-                }
-            });
+            $result = $process->wait();
+        } catch (Throwable $exception) {
+            unset($this->streaming[$id]);
+
+            $this->stop($process, 1.0);
+
+            throw $exception;
         } finally {
-            unset($this->running[spl_object_id($process)]);
+            unset($this->running[$id], $this->streaming[$id]);
         }
 
         return [$result->exitCode() ?? 1, $result->output(), $result->errorOutput()];
@@ -142,15 +168,23 @@ class Runner
     public function stopRunning(float $timeout = 3.0): void
     {
         foreach ($this->running as $process) {
-            if (! $process->running()) {
-                continue;
-            }
+            $this->stop($process, $timeout);
+        }
+    }
 
-            if ($process instanceof InvokedProcess || $process instanceof FakeInvokedProcess) {
-                $process->stop($timeout);
-            } else {
-                $process->signal(15);
-            }
+    /**
+     * @param  \Illuminate\Contracts\Process\InvokedProcess  $process
+     */
+    protected function stop(object $process, float $timeout): void
+    {
+        if (! $process->running()) {
+            return;
+        }
+
+        if ($process instanceof InvokedProcess || $process instanceof FakeInvokedProcess) {
+            $process->stop($timeout);
+        } else {
+            $process->signal(15);
         }
     }
 

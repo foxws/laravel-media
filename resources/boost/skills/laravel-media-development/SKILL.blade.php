@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, progress reporting, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -115,6 +115,32 @@ $media->ffmpeg()
 - The duration comes from the probe, a clip's length, the sum of the clips for `clips()`, or all files for `concat()`. A single `frame()` reports no percentage.
 - Two-pass encodes report one percentage: the first pass is 0-50% and the second 50-100%.
 - Callbacks run inside the job, so keep them cheap (throttle database writes or broadcasts yourself if needed).
+- **Cancelling:** return `false` from a progress callback, e.g. when the user cancelled. ffmpeg is stopped, nothing is saved, and a `ProcessFailedException` with reason `Cancelled` (not retryable) is thrown.
+
+## Events
+
+Exports dispatch events. Add `->withContext([...])` on the builder or `thumbnails()` so listeners know what an export is about.
+
+| Event | When | Properties |
+| --- | --- | --- |
+| `Foxws\Media\Events\ProgressReported` | every progress update (about twice a second) | `progress`, `context` |
+| `Foxws\Media\Events\ExportCompleted` | after the outputs are on the target disk and `afterSaving` ran | `result` (`ExportResult`), `context`, `duration` |
+| `Foxws\Media\Events\ExportFailed` | when an export throws | `exception`, `context` |
+| `Foxws\Media\Process\Events\ProcessStarted`/`ProcessCompleted`/`ProcessFailed` | every ffmpeg/ffprobe run | redacted command, `result`, `reason` |
+
+@boostsnippet("Broadcasting progress", "php")
+$media->ffmpeg()->withContext(['video_id' => $video->id])->inFormat(Format::h264())->save('encoded.mp4');
+
+// A listener, e.g. in AppServiceProvider::boot()
+Event::listen(function (ProgressReported $event) {
+    if (isset($event->context['video_id'])) {
+        broadcast(new VideoEncoding($event->context['video_id'], $event->progress->percentage()));
+    }
+});
+@endboostsnippet
+
+- Progress is requested from ffmpeg as soon as there's a progress callback or a `ProgressReported` listener, so listening alone is enough.
+- `thumbnails()` dispatches `ExportCompleted` for its sprite sheets, then writes the VTT file.
 
 ## Several outputs in one run
 

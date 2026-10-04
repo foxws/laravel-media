@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace Foxws\Media\FFMpeg;
 
+use Foxws\Media\Concerns\HasContext;
 use Foxws\Media\Concerns\HasSaveCallbacks;
 use Foxws\Media\Concerns\ReportsProgress;
 use Foxws\Media\Encoding\Format;
 use Foxws\Media\Encoding\VideoCodec;
+use Foxws\Media\Events\ExportCompleted;
+use Foxws\Media\Events\ExportFailed;
+use Foxws\Media\Events\ProgressReported;
 use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
+use Foxws\Media\Exceptions\ProcessCancelledException;
 use Foxws\Media\Exceptions\TemporaryFileException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
@@ -29,6 +34,7 @@ use Foxws\Media\Opener;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Traits\Conditionable;
 use Throwable;
 
@@ -38,6 +44,7 @@ use Throwable;
 class Builder
 {
     use Conditionable;
+    use HasContext;
     use HasSaveCallbacks;
     use ReportsProgress;
 
@@ -405,6 +412,28 @@ class Builder
 
         $this->runBeforeSavingCallbacks();
 
+        $startedAt = hrtime(true);
+
+        try {
+            $result = $this->export($path);
+        } catch (Throwable $exception) {
+            Event::dispatch(new ExportFailed($exception, $this->context));
+
+            throw $exception;
+        }
+
+        $this->runAfterSavingCallbacks($result);
+
+        Event::dispatch(new ExportCompleted($result, $this->context, (hrtime(true) - $startedAt) / 1e9));
+
+        return $result;
+    }
+
+    /**
+     * Run ffmpeg into a temporary directory and copy the outputs to the target disk.
+     */
+    protected function export(?string $path): ExportResult
+    {
         $directory = $this->directories->create();
 
         try {
@@ -432,11 +461,7 @@ class Builder
 
         $paths = array_values(array_unique([...array_map(fn (string $file): string => ltrim($file, '/'), $declared), ...$written]));
 
-        $result = new ExportResult($target, array_values(array_intersect($paths, $written)));
-
-        $this->runAfterSavingCallbacks($result);
-
-        return $result;
+        return new ExportResult($target, array_values(array_intersect($paths, $written)));
     }
 
     /**
@@ -573,7 +598,13 @@ class Builder
             timeout: $this->timeout,
             onOutput: function (string $output) use ($parser, $pass, $passes): void {
                 foreach ($parser->feed($output) as $progress) {
-                    $this->reportProgress($progress->forPass($pass, $passes));
+                    $progress = $progress->forPass($pass, $passes);
+
+                    Event::dispatch(new ProgressReported($progress, $this->context));
+
+                    if (! $this->reportProgress($progress)) {
+                        throw ProcessCancelledException::make();
+                    }
                 }
             },
         );
