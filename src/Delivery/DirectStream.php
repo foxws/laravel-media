@@ -22,11 +22,15 @@ use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\VideoStream;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
+
+use function Illuminate\Support\defer;
 
 /**
  * Streams the opened files as HLS or DASH straight from where they're stored, like nginx-vod-module:
@@ -65,6 +69,10 @@ class DirectStream
 
     protected bool $chapters = false;
 
+    protected ?int $lookAhead = null;
+
+    protected ?LookAheadStrategy $lookAheadStrategy = null;
+
     public function __construct(
         protected Opener $opener,
         protected Runner $runner,
@@ -88,6 +96,19 @@ class DirectStream
     public function toCache(Disk|Filesystem|string $disk): static
     {
         $this->cacheDisk = Disk::make($disk);
+
+        return $this;
+    }
+
+    /**
+     * Package this many segments after each requested one ahead of time, instead of
+     * media.delivery.look_ahead; 0 turns it off. Without a strategy, media.delivery.look_ahead_via
+     * picks one.
+     */
+    public function lookAhead(int $segments, ?LookAheadStrategy $strategy = null): static
+    {
+        $this->lookAhead = max(0, $segments);
+        $this->lookAheadStrategy = $strategy;
 
         return $this;
     }
@@ -683,7 +704,11 @@ class DirectStream
      */
     public function initSegmentResponse(int $variant, Track $track): Response
     {
-        return $this->fileResponse($this->initSegment($variant, $track), $track->contentType());
+        $path = $this->initSegment($variant, $track);
+
+        $this->packageAhead($variant, 1, $track);
+
+        return $this->fileResponse($path, $track->contentType());
     }
 
     /**
@@ -699,10 +724,16 @@ class DirectStream
         if ($track !== null) {
             $this->ensureUnencrypted();
 
-            return $this->fileResponse($this->segment($variant, $index, $track), $track->contentType());
+            $path = $this->segment($variant, $index, $track);
+
+            $this->packageAhead($variant, $index + 1, $track);
+
+            return $this->fileResponse($path, $track->contentType());
         }
 
         $path = $this->segment($variant, $index);
+
+        $this->packageAhead($variant, $index + 1);
 
         if ($this->keys !== null) {
             return new Response($this->encrypt((string) $this->cacheDisk()->get($path), $index), 200, [
@@ -712,6 +743,92 @@ class DirectStream
         }
 
         return $this->fileResponse($path, 'video/mp2t');
+    }
+
+    /**
+     * Package the look-ahead number of segments from the given one that aren't cached yet, in a
+     * queued PackageSegments job or after the response. Streams whose disks can't be named in a
+     * job, or whose queue runs synchronously, use the response instead.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function packageAhead(int $variant, int $from, ?Track $track = null): void
+    {
+        $count = $this->lookAhead ?? Config::integer('media.delivery.look_ahead', 0);
+        $strategy = $this->lookAheadStrategy ?? LookAheadStrategy::tryFrom((string) Config::get('media.delivery.look_ahead_via'));
+
+        if ($count < 1 || $strategy === null) {
+            return;
+        }
+
+        $media = $this->media($variant);
+        $missing = [];
+
+        foreach (array_slice($this->segments($variant), max(0, $from), $count) as $segment) {
+            if (! $this->cacheDisk()->exists($this->segmentPath($media, $segment, $track))) {
+                $missing[] = $segment->index;
+            }
+        }
+
+        if ($missing === []) {
+            return;
+        }
+
+        if ($strategy === LookAheadStrategy::Queue && $this->canQueue($media)) {
+            $connection = Config::get('media.delivery.look_ahead_connection');
+            $queue = Config::get('media.delivery.look_ahead_queue');
+
+            Bus::dispatch(
+                new PackageSegments($media->disk()->name(), $media->path(), $missing, $track, $this->targetDuration(), $this->cacheDisk()->name())
+                    ->onConnection(is_string($connection) ? $connection : null)
+                    ->onQueue(is_string($queue) ? $queue : null),
+            );
+
+            return;
+        }
+
+        defer(function () use ($variant, $missing, $track): void {
+            foreach ($missing as $index) {
+                try {
+                    $this->segment($variant, $index, $track);
+                } catch (Throwable $exception) {
+                    report($exception);
+
+                    return;
+                }
+            }
+        });
+    }
+
+    /**
+     * Package the first look-ahead segments of every track in the DASH manifest, so playback can
+     * start from the cache.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function packageStart(): void
+    {
+        foreach ($this->videoVariants() as $variant) {
+            $this->packageAhead($variant, 0, Track::Video);
+        }
+
+        if (($audio = $this->audioVariant()) !== null) {
+            $this->packageAhead($audio, 0, Track::Audio);
+        }
+    }
+
+    /**
+     * Whether a job can open the media and the cache disk by name, on a queue that doesn't run
+     * the job straight away.
+     */
+    protected function canQueue(Media $media): bool
+    {
+        $connection = Config::get('media.delivery.look_ahead_connection') ?? Config::get('queue.default');
+
+        return Config::has('filesystems.disks.'.$media->disk()->name())
+            && Config::has('filesystems.disks.'.$this->cacheDisk()->name())
+            && is_string($connection)
+            && Config::get("queue.connections.{$connection}.driver") !== 'sync';
     }
 
     protected function fileResponse(string $path, string $contentType, ?Disk $disk = null): Response
