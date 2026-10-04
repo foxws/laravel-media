@@ -27,6 +27,7 @@
   ],
   "require": {
     "php": "^8.4",
+    "ext-openssl": "*",
     "illuminate/console": "^13.0",
     "illuminate/contracts": "^13.0",
     "illuminate/filesystem": "^13.0",

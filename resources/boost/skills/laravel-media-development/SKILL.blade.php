@@ -112,6 +112,27 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **Players:** hls.js and Safari play these TS segments natively. Shaka Player needs mux.js loaded (`window.muxjs`) to transmux them.
 - `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
 
+### Encrypting direct streams
+
+@boostsnippet("Per-request AES-128", "php")
+use Foxws\Media\Encryption\EncryptionKey;
+
+$stream = Media::fromDisk('videos')->open($video->renditions())->stream()
+    ->withEncryption(
+        fn (int $period) => EncryptionKey::derive(config('app.key'), "video:{$video->id}:{$period}"),
+        fn (int $period, int $variant) => URL::temporarySignedRoute('videos.key', now()->addHours(4), [$video, $period]),
+        rotateEvery: 100,   // a new key every 100 segments; leave out for one key per playlist
+    );
+
+// key route, after authorizing the viewer:
+return $stream->keyResponse($period);
+@endboostsnippet
+
+- **How it works:** media playlists get `#EXT-X-KEY:METHOD=AES-128` tags, a new one for each rotation period. `segmentResponse()` encrypts each segment for the request with AES-128-CBC, using its period's key and its media sequence number as the IV (the HLS default, so playlists leave the IV out).
+- **What's cached:** segments stay unencrypted on the cache disk and are shared by every key. Keep that disk private. Encrypted streams are served by the app instead of redirecting to the cache disk.
+- **Keys:** `EncryptionKey::derive($secret, $context)` makes keys deterministic per context (HMAC-SHA256), so they don't need storing. Pass a fixed `EncryptionKey` instead of a callback for one stored key.
+- **Serving keys:** `keyResponse($period)` returns the raw 16-byte key with `no-store`, and `key($period)` returns the `EncryptionKey`. Always authorize the key route.
+
 ## Scenes, clips and reels
 
 @boostsnippet("A reel from scenes", "php")

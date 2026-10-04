@@ -31,6 +31,22 @@ final readonly class EncryptionKey implements Arrayable
     }
 
     /**
+     * A key derived from a secret and a context, e.g. derive(config('app.key'), "video:1:0"), so the
+     * same context always gives the same key and keys don't have to be stored.
+     */
+    public static function derive(string $secret, string $context): self
+    {
+        if ($secret === '') {
+            throw new InvalidArgumentException('Deriving an encryption key needs a secret.');
+        }
+
+        return new self(
+            substr(hash_hmac('sha256', "key|{$context}", $secret), 0, 32),
+            substr(hash_hmac('sha256', "id|{$context}", $secret), 0, 32),
+        );
+    }
+
+    /**
      * The raw 16-byte key, as served to HLS players from a key URI.
      */
     public function binary(): string

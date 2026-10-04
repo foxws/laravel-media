@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Delivery;
 
+use Closure;
+use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\Executables\Executable;
@@ -17,6 +19,7 @@ use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -30,6 +33,14 @@ class DirectStream
     protected ?float $segmentDuration = null;
 
     protected ?Disk $cacheDisk = null;
+
+    /** @var (Closure(int): EncryptionKey)|null */
+    protected ?Closure $keys = null;
+
+    /** @var (Closure(int, int): string)|null */
+    protected ?Closure $keyUrl = null;
+
+    protected ?int $rotateEvery = null;
 
     public function __construct(
         protected Opener $opener,
@@ -56,6 +67,53 @@ class DirectStream
         $this->cacheDisk = Disk::make($disk);
 
         return $this;
+    }
+
+    /**
+     * Encrypt segments with AES-128 for each request. The cached segments stay unencrypted, so they
+     * can be served with any key. Players fetch the key from the key URL; serve it with keyResponse().
+     *
+     * @param  EncryptionKey|callable(int): EncryptionKey  $key  A key, or a resolver that receives the rotation period,
+     *                                                           e.g. fn (int $period) => EncryptionKey::derive($secret, "video:1:{$period}").
+     * @param  callable(int, int): string  $keyUrl  Receives the rotation period and the variant, and returns the key's URL.
+     * @param  int|null  $rotateEvery  Use a new key every this many segments; null for one key per playlist.
+     */
+    public function withEncryption(EncryptionKey|callable $key, callable $keyUrl, ?int $rotateEvery = null): static
+    {
+        if ($rotateEvery !== null && $rotateEvery < 1) {
+            throw new InvalidArgumentException('Keys must rotate after at least one segment.');
+        }
+
+        $this->keys = $key instanceof EncryptionKey ? fn (): EncryptionKey => $key : $key(...);
+        $this->keyUrl = $keyUrl(...);
+        $this->rotateEvery = $rotateEvery;
+
+        return $this;
+    }
+
+    /**
+     * The key of a rotation period.
+     *
+     * @throws InvalidArgumentException
+     */
+    public function key(int $period = 0): EncryptionKey
+    {
+        if ($this->keys === null) {
+            throw new InvalidArgumentException('This stream is not encrypted. Call withEncryption() first.');
+        }
+
+        return ($this->keys)($period);
+    }
+
+    /**
+     * The raw key of a rotation period, as HLS players fetch it from the key URL. Authorize the request first.
+     */
+    public function keyResponse(int $period = 0): Response
+    {
+        return new Response($this->key($period)->binary(), 200, [
+            'Content-Type' => 'application/octet-stream',
+            'Cache-Control' => 'private, no-store',
+        ]);
     }
 
     /**
@@ -106,7 +164,15 @@ class DirectStream
             '#EXT-X-PLAYLIST-TYPE:VOD',
         ];
 
+        $period = null;
+
         foreach ($segments as $segment) {
+            if ($this->keyUrl !== null && $period !== $this->period($segment->index)) {
+                $period = $this->period($segment->index);
+
+                $lines[] = '#EXT-X-KEY:METHOD=AES-128,URI="'.($this->keyUrl)($period, $variant).'"';
+            }
+
             $lines[] = '#EXTINF:'.number_format($segment->duration, 6, '.', '').',';
             $lines[] = $segmentUrl($segment, $variant);
         }
@@ -161,7 +227,8 @@ class DirectStream
 
     /**
      * A response for a segment: a redirect to a temporary URL when the cache disk provides them
-     * (e.g. S3), otherwise the file itself.
+     * (e.g. S3), otherwise the file itself. Encrypted streams always respond with the segment,
+     * encrypted with the key of its rotation period.
      *
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
@@ -172,6 +239,13 @@ class DirectStream
         $disk = $this->cacheDisk();
         $lifetime = Config::integer('media.delivery.url_lifetime', 3600);
 
+        if ($this->keys !== null) {
+            return new Response($this->encrypt((string) $disk->get($path), $index), 200, [
+                'Content-Type' => 'video/mp2t',
+                'Cache-Control' => "private, max-age={$lifetime}",
+            ]);
+        }
+
         if (! $disk->isLocal() && $disk->providesTemporaryUrls()) {
             return new RedirectResponse($disk->temporaryUrl($path, now()->addSeconds($lifetime)));
         }
@@ -180,6 +254,23 @@ class DirectStream
             'Content-Type' => 'video/mp2t',
             'Cache-Control' => "public, max-age={$lifetime}, immutable",
         ]);
+    }
+
+    /**
+     * AES-128-CBC with PKCS#7 padding, as HLS defines it. Playlists leave out the IV, so players use the
+     * segment's media sequence number as a 16-byte big-endian IV, and the sequence starts at zero.
+     */
+    protected function encrypt(string $segment, int $index): string
+    {
+        $iv = str_pad(pack('J', $index), 16, "\0", STR_PAD_LEFT);
+
+        return openssl_encrypt($segment, 'aes-128-cbc', $this->key($this->period($index))->binary(), OPENSSL_RAW_DATA, $iv)
+            ?: throw new InvalidArgumentException('The segment could not be encrypted.');
+    }
+
+    protected function period(int $index): int
+    {
+        return $this->rotateEvery !== null ? intdiv($index, $this->rotateEvery) : 0;
     }
 
     public function cacheDisk(): Disk
