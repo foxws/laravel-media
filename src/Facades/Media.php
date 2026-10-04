@@ -16,9 +16,10 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @method static \Foxws\Media\Opener fromDisk(\Foxws\Media\Filesystem\Disk|\Illuminate\Contracts\Filesystem\Filesystem|string $disk)
  * @method static \Foxws\Media\Opener open(string|list<string> ...$paths)
- * @method static void assertRan(\Foxws\Media\Executables\Executable $executable, (\Closure(list<string>): bool)|null $callback = null)
- * @method static void assertNotRan(\Foxws\Media\Executables\Executable $executable, (\Closure(list<string>): bool)|null $callback = null)
- * @method static void assertRanTimes(\Foxws\Media\Executables\Executable $executable, int $times)
+ * @method static void assertRan(\Foxws\Media\Executables\Binary $executable, (\Closure(list<string>): bool)|null $callback = null)
+ * @method static void assertNotRan(\Foxws\Media\Executables\Binary $executable, (\Closure(list<string>): bool)|null $callback = null)
+ * @method static void assertRanTimes(\Foxws\Media\Executables\Binary $executable, int $times)
+ * @method static \Foxws\Media\Testing\MediaFake respondUsing(\Foxws\Media\Executables\Binary $executable, \Closure(list<string>): string $respond)
  * @method static void assertNothingRan()
  * @method static void assertProbed(string $path)
  * @method static void assertSaved(string $path, ?string $disk = null)

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Process;
 
-use Foxws\Media\Executables\Executable;
+use Foxws\Media\Executables\Binary;
 
 final readonly class Result
 {
     public function __construct(
-        public Executable $executable,
+        public Binary $executable,
         public string $command,
         public int $exitCode,
         public string $output,

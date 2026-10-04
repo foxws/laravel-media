@@ -27,7 +27,7 @@ class ProcessFailedException extends RuntimeException
         $reason ??= FailureReason::fromErrorOutput($result->errorOutput.' '.$result->output);
 
         return new self(
-            sprintf('%s exited with code %d (%s): %s', $result->executable->value, $result->exitCode, $reason->value, static::tail($result, 5)),
+            sprintf('%s exited with code %d (%s): %s', $result->executable->identifier(), $result->exitCode, $reason->value, static::tail($result, 5)),
             $result,
             $reason,
         );
@@ -36,7 +36,7 @@ class ProcessFailedException extends RuntimeException
     public static function timedOut(Result $result, int $timeout): self
     {
         return new self(
-            sprintf('%s was stopped after the timeout of %d seconds.', $result->executable->value, $timeout),
+            sprintf('%s was stopped after the timeout of %d seconds.', $result->executable->identifier(), $timeout),
             $result,
             FailureReason::Timeout,
         );
@@ -45,7 +45,7 @@ class ProcessFailedException extends RuntimeException
     public static function cancelled(Result $result): self
     {
         return new self(
-            sprintf('%s was cancelled.', $result->executable->value),
+            sprintf('%s was cancelled.', $result->executable->identifier()),
             $result,
             FailureReason::Cancelled,
         );
@@ -67,7 +67,7 @@ class ProcessFailedException extends RuntimeException
     public function context(): array
     {
         return [
-            'executable' => $this->result->executable->value,
+            'executable' => $this->result->executable->identifier(),
             'exit_code' => $this->result->exitCode,
             'reason' => $this->reason->value,
             'retryable' => $this->isRetryable(),

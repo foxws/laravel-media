@@ -5,12 +5,14 @@ declare(strict_types=1);
 use Foxws\Media\Exceptions\FailureReason;
 use Foxws\Media\Exceptions\ProcessCancelledException;
 use Foxws\Media\Exceptions\ProcessFailedException;
+use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
 use Foxws\Media\Process\Runner;
+use Foxws\Media\Tests\Fixtures\AddOnExecutable;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\FakeProcessResult;
 use Illuminate\Support\Facades\Event;
@@ -29,6 +31,25 @@ it('runs the resolved executable and returns its output', function () {
         ->successful()->toBeTrue()
         ->output->toContain('{"streams":[]}');
     Process::assertRan(fn ($process) => $process->command === [$path, '-version']);
+});
+
+it('passes extra environment variables to the process', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Process::fake();
+
+    Runner::make()->run(Executable::FFMpeg, ['-version'], environment: ['SVT_LOG' => '1']);
+
+    Process::assertRan(fn ($process) => $process->environment === ['SVT_LOG' => '1']);
+});
+
+it('runs executables of other packages', function () {
+    config(['add-on.executables.encoder' => fakeExecutable(Executable::FFMpeg)]);
+    Process::fake(['*' => Process::result(output: 'encoded')]);
+
+    $result = Runner::make()->run(AddOnExecutable::Encoder, ['--input', 'video.mp4']);
+
+    expect($result->executable)->toBe(AddOnExecutable::Encoder)
+        ->and($result->output)->toContain('encoded');
 });
 
 it('throws with the error output when the process fails', function () {
@@ -113,7 +134,7 @@ it('turns a timeout into a retryable failure and passes the reason to the failed
     Event::fake([ProcessFailed::class]);
     $runner = new class(app(Executables::class)) extends Runner
     {
-        protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
+        protected function execute(Binary $executable, array $command, int $timeout, ?callable $onOutput, array $environment = []): array
         {
             throw new ProcessTimedOutException(
                 new SymfonyProcessTimedOutException(new SymfonyProcess($command, timeout: $timeout), SymfonyProcessTimedOutException::TYPE_GENERAL),

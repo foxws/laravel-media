@@ -11,8 +11,10 @@ use Foxws\Media\FFMpeg\Output;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Progress;
+use Foxws\Media\Process\Runner;
 use Foxws\Media\Testing\FakeProbe;
 use Foxws\Media\Testing\MediaFake;
+use Foxws\Media\Tests\Fixtures\AddOnExecutable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -187,4 +189,20 @@ it('fakes a keyframe every two seconds', function () {
 
     expect($index->keyframes)->toBe([0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0])
         ->and(count($index->segments(6)))->toBe(3);
+});
+
+it('fakes the output of executables from other packages', function () {
+    Media::fake()->respondUsing(AddOnExecutable::Encoder, fn (array $arguments) => 'crf '.end($arguments));
+
+    $result = Runner::make()->run(AddOnExecutable::Encoder, ['--target', '95']);
+
+    expect($result->output)->toBe('crf 95');
+    Media::assertRan(AddOnExecutable::Encoder, fn (array $arguments) => $arguments === ['--target', '95']);
+});
+
+it('records runs of executables from other packages without a faked output', function () {
+    Media::fake();
+
+    expect(Runner::make()->run(AddOnExecutable::Encoder, ['--version'])->output)->toBe('');
+    Media::assertRanTimes(AddOnExecutable::Encoder, 1);
 });
