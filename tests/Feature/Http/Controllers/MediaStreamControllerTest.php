@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Facades\MediaStream;
+use Foxws\Media\FFMpeg\ThumbnailsResult;
+use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -126,4 +128,17 @@ it('serves subtitles for cmaf, mpeg-ts and dash', function () {
     $this->get('videos/1/subtitles/0/hls.vtt')->assertSee('X-TIMESTAMP-MAP=MPEGTS:0,');
     $this->get('videos/1/subtitles/0.vtt')->assertDontSee('X-TIMESTAMP-MAP');
     $this->get('videos/1/subtitles/1.vtt')->assertNotFound();
+});
+
+it('serves thumbnails as an image track in hls and dash', function () {
+    Storage::fake('storyboards')->put('1/sb_001.webp', 'sheet');
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()
+        ->withThumbnails(new ThumbnailsResult(Disk::make('storyboards'), ['1/sb_001.webp'], '1/sb.vtt', 2.0, 4, 2, 2)));
+
+    $this->get('videos/1/cmaf.m3u8')->assertSee('CODECS="webp",URI="http://localhost/videos/1/thumbnails.m3u8"', escape: false);
+    $this->get('videos/1/hls.m3u8')->assertSee('#EXT-X-IMAGE-STREAM-INF');
+    $this->get('videos/1/thumbnails.m3u8')->assertSee('http://localhost/videos/1/thumbnails/0.webp');
+    $this->get('videos/1/dash.mpd')->assertSee('<SegmentURL media="http://localhost/videos/1/thumbnails/0.webp"/>', escape: false);
+    $this->get('videos/1/thumbnails/0.webp')->assertOk()->assertHeader('Content-Type', 'image/webp');
+    $this->get('videos/1/thumbnails/1.webp')->assertNotFound();
 });

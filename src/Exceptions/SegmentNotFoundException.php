@@ -21,6 +21,16 @@ class SegmentNotFoundException extends NotFoundHttpException
         return new self("Subtitle {$subtitle} doesn't exist.");
     }
 
+    public static function forSheet(int $sheet): self
+    {
+        return new self("Thumbnail sheet {$sheet} doesn't exist.");
+    }
+
+    public static function noThumbnails(): self
+    {
+        return new self('This stream has no thumbnails.');
+    }
+
     public static function forTrack(int $variant, string $track): self
     {
         return new self("Variant {$variant} has no {$track} track.");

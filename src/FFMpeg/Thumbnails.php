@@ -236,7 +236,7 @@ class Thumbnails
 
         $this->disk()->put($vtt, $this->webVtt($name, $duration, $interval, $count), $this->visibility !== null ? ['visibility' => $this->visibility] : []);
 
-        $result = new ThumbnailsResult($this->disk(), $sprites, $vtt, $interval, $count);
+        $result = new ThumbnailsResult($this->disk(), $sprites, $vtt, $interval, $count, $this->columns, $this->rows, $this->width, $this->height);
 
         $this->runAfterSavingCallbacks($result);
 
