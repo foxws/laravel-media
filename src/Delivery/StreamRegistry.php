@@ -40,7 +40,8 @@ class StreamRegistry
     }
 
     /**
-     * The URL of a stream's HLS master playlist, signed when the stream is.
+     * The URL of a stream's HLS playlist with fragmented MP4 (CMAF) segments, which DASH shares,
+     * signed when the stream is. Encrypted streams need hlsUrl().
      *
      * @param  array<string, mixed>  $parameters
      *
@@ -48,7 +49,19 @@ class StreamRegistry
      */
     public function url(string $name, array $parameters = []): string
     {
-        return $this->routeUrl($name, 'master', $parameters);
+        return $this->routeUrl($name, 'cmaf', $parameters);
+    }
+
+    /**
+     * The URL of a stream's HLS playlist with MPEG-TS segments, signed when the stream is.
+     *
+     * @param  array<string, mixed>  $parameters
+     *
+     * @throws InvalidArgumentException
+     */
+    public function hlsUrl(string $name, array $parameters = []): string
+    {
+        return $this->routeUrl($name, 'hls', $parameters);
     }
 
     /**

@@ -78,6 +78,7 @@ class DirectStream
     /**
      * Serve HLS with fragmented MP4 (CMAF) segments instead of MPEG-TS: video and audio become separate
      * tracks, shared with dashManifest(), and the audio of the first file with audio is the audio rendition.
+     * Route::mediaStream() picks the format per route, so only call this when serving playlists yourself.
      */
     public function fragmented(bool $fragmented = true): static
     {

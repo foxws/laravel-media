@@ -19,8 +19,8 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * Serves the routes of Route::mediaStream(): the HLS master and media playlists, the DASH manifest,
- * MPEG-TS segments, fragmented MP4 initialization and media segments, and keys.
+ * Serves the routes of Route::mediaStream(): HLS with fragmented MP4 (CMAF) or MPEG-TS segments,
+ * DASH with the same fragmented MP4 segments, and the keys of encrypted MPEG-TS streams.
  */
 class MediaStreamController
 {
@@ -28,29 +28,48 @@ class MediaStreamController
 
     public function __construct(protected StreamRegistry $streams) {}
 
-    public function master(Request $request): Response
+    /**
+     * The HLS master playlist with fragmented MP4 (CMAF) segments, shared with the DASH manifest.
+     */
+    public function cmaf(Request $request): Response
+    {
+        return $this->masterPlaylist($request, fragmented: true);
+    }
+
+    /**
+     * The HLS master playlist with MPEG-TS segments.
+     */
+    public function hls(Request $request): Response
+    {
+        return $this->masterPlaylist($request, fragmented: false);
+    }
+
+    protected function masterPlaylist(Request $request, bool $fragmented): Response
     {
         [$definition, $stream] = $this->resolve($request);
 
-        return $this->playlistResponse($stream->masterPlaylist(
+        return $this->playlistResponse($stream->fragmented($fragmented)->masterPlaylist(
             fn (int $variant, ?Track $track): string => $track !== null
                 ? $this->url($request, $definition, 'track-playlist', ['variant' => $variant, 'track' => $track->value])
                 : $this->url($request, $definition, 'playlist', ['variant' => $variant]),
         ));
     }
 
+    /**
+     * The media playlist of a variant with MPEG-TS segments.
+     */
     public function playlist(Request $request): Response
     {
         [$definition, $stream] = $this->resolve($request);
 
-        return $this->playlistResponse($stream->mediaPlaylist(
+        return $this->playlistResponse($stream->fragmented(false)->mediaPlaylist(
             $this->number($request, 'variant'),
             fn (Segment $segment, int $variant): string => $this->url($request, $definition, 'segment', ['variant' => $variant, 'segment' => $segment->index]),
         ));
     }
 
     /**
-     * The media playlist of a track of a fragmented stream.
+     * The media playlist of a track with fragmented MP4 segments.
      */
     public function trackPlaylist(Request $request): Response
     {
