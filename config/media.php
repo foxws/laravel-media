@@ -64,7 +64,8 @@ return [
     | any disk: local storage, a mounted /tmp or RAM disk, or S3. Segments on
     | disks with temporary URLs are served by redirecting to one that is valid
     | for url_lifetime seconds. lock_timeout is how long concurrent requests
-    | for the same segment wait while it's packaged.
+    | for the same segment wait while it's packaged. Schedule "media:prune" to
+    | delete old segments; they are packaged again when requested.
     |
     */
 

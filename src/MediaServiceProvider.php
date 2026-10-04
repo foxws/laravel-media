@@ -6,11 +6,14 @@ namespace Foxws\Media;
 
 use Foxws\Media\Commands\CleanCommand;
 use Foxws\Media\Commands\InfoCommand;
+use Foxws\Media\Commands\PruneCommand;
+use Foxws\Media\Delivery\StreamRegistry;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\Http\Controllers\MediaStreamController;
 use Foxws\Media\Packaging\PackagerManager;
 use Foxws\Media\Probe\Prober;
 use Foxws\Media\Process\Runner;
@@ -20,6 +23,7 @@ use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\ServiceProvider;
 use Psr\Log\LoggerInterface;
@@ -38,6 +42,7 @@ class MediaServiceProvider extends ServiceProvider
         $this->app->singleton(Prober::class);
         $this->app->singleton(MediaFactory::class);
         $this->app->singleton(PackagerManager::class);
+        $this->app->singleton(StreamRegistry::class);
 
         $this->app->singleton(TemporaryDirectories::class, fn (): TemporaryDirectories => new TemporaryDirectories(
             root: Config::string('media.temporary_files.root', sys_get_temp_dir()),
@@ -68,6 +73,7 @@ class MediaServiceProvider extends ServiceProvider
         $this->app->terminating(fn () => $this->app->make(TemporaryDirectories::class)->deleteAll());
 
         $this->cleanUpAfterQueueJobs();
+        $this->registerRouteMacro();
 
         if (! $this->app->runningInConsole()) {
             return;
@@ -76,6 +82,7 @@ class MediaServiceProvider extends ServiceProvider
         $this->commands([
             CleanCommand::class,
             InfoCommand::class,
+            PruneCommand::class,
         ]);
 
         AboutCommand::add('Media', fn (): array => $this->aboutSection());
@@ -131,6 +138,30 @@ class MediaServiceProvider extends ServiceProvider
             }
 
             $this->app->make(TemporaryDirectories::class)->deleteAll();
+        });
+    }
+
+    /**
+     * Route::mediaStream('videos/{video}', 'videos') serves a stream defined with MediaStream::define():
+     * master.m3u8, {variant}/index.m3u8, {variant}/{segment}.ts and {variant}/keys/{period}.key.
+     */
+    protected function registerRouteMacro(): void
+    {
+        Router::macro('mediaStream', function (string $uri, string $stream): void {
+            /** @var Router $this */
+            $this->group(['prefix' => $uri, 'as' => "media.{$stream}."], function (Router $router) use ($stream): void {
+                $router->get('master.m3u8', [MediaStreamController::class, 'master'])
+                    ->name('master')->defaults('mediaStream', $stream);
+
+                $router->get('{variant}/index.m3u8', [MediaStreamController::class, 'playlist'])
+                    ->name('playlist')->defaults('mediaStream', $stream)->whereNumber('variant');
+
+                $router->get('{variant}/{segment}.ts', [MediaStreamController::class, 'segment'])
+                    ->name('segment')->defaults('mediaStream', $stream)->whereNumber(['variant', 'segment']);
+
+                $router->get('{variant}/keys/{period}.key', [MediaStreamController::class, 'key'])
+                    ->name('key')->defaults('mediaStream', $stream)->whereNumber(['variant', 'period']);
+            });
         });
     }
 
