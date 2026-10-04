@@ -6,9 +6,9 @@ namespace Foxws\Media\Testing;
 
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
+use Foxws\Media\MediaConfig;
 use Foxws\Media\Process\Runner;
 use Illuminate\Filesystem\Filesystem;
-use Illuminate\Support\Facades\Config;
 
 /**
  * Answers ffprobe with fake probe data and makes ffmpeg write placeholder outputs,
@@ -19,6 +19,7 @@ class FakeRunner extends Runner
     public function __construct(
         protected MediaFake $fake,
         Executables $executables,
+        protected MediaConfig $config,
     ) {
         parent::__construct($executables);
     }
@@ -81,12 +82,7 @@ class FakeRunner extends Runner
      */
     protected function outputs(array $arguments): array
     {
-        $roots = array_filter([
-            Config::get('media.temporary_files.root'),
-            Config::get('media.temporary_files.cache_root'),
-        ], fn (mixed $root): bool => is_string($root) && $root !== '');
-
-        $roots = array_map(fn (string $root): string => rtrim(str_replace('\\', '/', $root), '/').'/', $roots);
+        $roots = array_map(fn (string $root): string => rtrim(str_replace('\\', '/', $root), '/').'/', $this->config->temporaryRoots());
 
         $outputs = [];
 

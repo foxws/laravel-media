@@ -117,9 +117,9 @@ it('fails the next run when asked, with the real failure handling', function () 
 });
 
 it('asserts on the default media disk and on runs that did not happen', function () {
+    mediaConfig(['media.disk' => 'local']);
     Media::fake();
     Storage::fake('local');
-    config(['media.disk' => 'local']);
 
     Media::open('video.mp4')->ffmpeg()->frame(at: 1)->save('thumb.jpg');
 

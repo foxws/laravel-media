@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Illuminate\Support\Facades\Config;
 
 arch()->preset()->php();
 
@@ -21,3 +22,8 @@ arch('the core does not depend on tools, encoders, packagers or delivery')
 arch('filters are plain filter graph values that any executable can use')
     ->expect('Foxws\\Media\\Filters')
     ->not->toUse(['Foxws\\Media\\FFMpeg', 'Foxws\\Media\\Process', 'Foxws\\Media\\Executables', 'Foxws\\Media\\Filesystem']);
+
+arch('configuration is read once by the service provider and injected as MediaConfig')
+    ->expect('Foxws\\Media')
+    ->not->toUse([Config::class, 'config'])
+    ->ignoring('Foxws\\Media\\MediaServiceProvider');

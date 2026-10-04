@@ -495,7 +495,7 @@ it('tone maps inside the watermark graph', function () {
 
 it('runs ffmpeg with its own timeout instead of the configured one', function () {
     fakeExecutable(Executable::FFMpeg);
-    config(['media.timeout' => 14400]);
+    mediaConfig(['media.timeout' => 14400]);
     Storage::fake('videos');
     fakeFFMpegWriting();
 
@@ -506,7 +506,7 @@ it('runs ffmpeg with its own timeout instead of the configured one', function ()
 
 it('uses the configured ffmpeg log level', function () {
     fakeExecutable(Executable::FFMpeg);
-    config(['media.ffmpeg_log_level' => 'warning']);
+    mediaConfig(['media.ffmpeg_log_level' => 'warning']);
     Storage::fake('videos');
 
     $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->arguments('out.mp4');

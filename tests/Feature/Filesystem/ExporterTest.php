@@ -23,7 +23,7 @@ it('uploads files to s3 under the disk root with their content type and acl', fu
 });
 
 it('uses a multipart upload for files at or above the threshold', function () {
-    config(['media.uploads.multipart_threshold' => 1024 * 1024, 'media.uploads.multipart_part_size' => 5 * 1024 * 1024]);
+    mediaConfig(['media.uploads.multipart_threshold' => 1024 * 1024, 'media.uploads.multipart_part_size' => 5 * 1024 * 1024]);
     $commands = [];
     $disk = Disk::make(recordingS3Disk($commands));
     $directory = directoryWith(['video.mp4' => str_repeat('v', 6 * 1024 * 1024), 'index.mpd' => '<MPD/>']);
@@ -40,7 +40,7 @@ it('uses a multipart upload for files at or above the threshold', function () {
 });
 
 it('aborts a failed multipart upload and reports the failure', function () {
-    config(['media.uploads.multipart_threshold' => 1024 * 1024]);
+    mediaConfig(['media.uploads.multipart_threshold' => 1024 * 1024]);
     $commands = [];
     recordingS3Disk($commands, failOn: 'UploadPart');
     $disk = Disk::make('recording-s3');

@@ -25,10 +25,10 @@ use Foxws\Media\Filters\FilterType;
 use Foxws\Media\Filters\Number;
 use Foxws\Media\Filters\Position;
 use Foxws\Media\Filters\Tonemap;
+use Foxws\Media\MediaConfig;
 use Foxws\Media\Opener;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Traits\Conditionable;
 use Throwable;
 
@@ -86,6 +86,7 @@ class Builder
         protected Runner $runner,
         protected TemporaryDirectories $directories,
         protected Exporter $exporter,
+        protected MediaConfig $config,
     ) {}
 
     /**
@@ -237,7 +238,7 @@ class Builder
      */
     public function watermark(string $path, Disk|Filesystem|string|null $disk = null, Position $position = Position::BottomRight, int $margin = 16, ?int $width = null): static
     {
-        $this->watermark = new Media($disk !== null ? Disk::make($disk) : $this->opener->disk(), $path, $this->directories);
+        $this->watermark = $this->opener->makeMedia($disk !== null ? Disk::make($disk) : $this->opener->disk(), $path);
         $this->watermarkFilter = ($width !== null ? "scale={$width}:-1," : '').'format=rgba';
         $this->watermarkFilter .= '[wm];[base][wm]overlay='.$position->overlay($margin);
 
@@ -313,7 +314,7 @@ class Builder
             '-y',
             '-hide_banner',
             '-nostdin',
-            '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
+            '-loglevel', $this->config->ffmpegLogLevel,
             ...$inputs,
             ...($this->watermark !== null ? ['-i', $this->watermark->inputPath()] : []),
             ...($output !== null ? [

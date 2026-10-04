@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Facades;
 
 use Foxws\Media\Executables\Executables;
+use Foxws\Media\MediaConfig;
 use Foxws\Media\MediaFactory;
 use Foxws\Media\Probe\Prober;
 use Foxws\Media\Process\Runner;
@@ -37,16 +38,17 @@ class Media extends Facade
     public static function fake(array $probes = []): MediaFake
     {
         $app = static::getFacadeApplication();
-        $fake = new MediaFake($probes);
 
         if ($app === null) {
-            return $fake;
+            return new MediaFake($probes);
         }
 
-        $executables = new FakeExecutables;
+        $config = $app->make(MediaConfig::class);
+        $fake = new MediaFake($probes, $config->disk);
+        $executables = new FakeExecutables($config);
 
         $app->instance(Executables::class, $executables);
-        $app->instance(Runner::class, new FakeRunner($fake, $executables));
+        $app->instance(Runner::class, new FakeRunner($fake, $executables, $config));
         $app->forgetInstance(Prober::class);
 
         static::swap($fake);

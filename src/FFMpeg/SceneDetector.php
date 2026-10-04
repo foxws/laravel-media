@@ -8,8 +8,8 @@ use Foxws\Media\Concerns\ResolvesFromContainer;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filters\Number;
+use Foxws\Media\MediaConfig;
 use Foxws\Media\Process\Runner;
-use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
 
 /**
@@ -19,7 +19,10 @@ class SceneDetector
 {
     use ResolvesFromContainer;
 
-    public function __construct(protected Runner $runner) {}
+    public function __construct(
+        protected Runner $runner,
+        protected MediaConfig $config,
+    ) {}
 
     /**
      * @param  float  $threshold  The minimum scene score (0-1) for a change; lower finds more scenes.
@@ -34,7 +37,7 @@ class SceneDetector
         $result = $this->runner->run(Executable::FFMpeg, [
             '-hide_banner',
             '-nostdin',
-            '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
+            '-loglevel', $this->config->ffmpegLogLevel,
             '-i', $media->inputPath(),
             '-map', '0:v:0',
             '-vf', "scale=320:-2,select='gt(scene,".Number::format($threshold).")',metadata=print:file=-",

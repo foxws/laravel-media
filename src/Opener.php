@@ -34,6 +34,7 @@ class Opener
         protected Disk $disk,
         protected TemporaryDirectories $directories,
         protected Prober $prober,
+        protected MediaConfig $config,
     ) {}
 
     public function fromDisk(Disk|Filesystem|string $disk): static
@@ -49,10 +50,18 @@ class Opener
     public function open(string|array ...$paths): static
     {
         foreach (array_merge(...array_map(fn (string|array $path): array => (array) $path, $paths)) as $path) {
-            $this->media[$path] = new Media($this->disk, $path, $this->directories);
+            $this->media[$path] = $this->makeMedia($this->disk, $path);
         }
 
         return $this;
+    }
+
+    /**
+     * A file on any disk, set up like the opened files, e.g. a watermark image.
+     */
+    public function makeMedia(Disk $disk, string $path): Media
+    {
+        return new Media($disk, $path, $this->directories, $this->config);
     }
 
     /**

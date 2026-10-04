@@ -6,7 +6,7 @@ namespace Foxws\Media\Executables;
 
 use Foxws\Media\Concerns\ResolvesFromContainer;
 use Foxws\Media\Exceptions\ExecutableNotFoundException;
-use Illuminate\Support\Facades\Config;
+use Foxws\Media\MediaConfig;
 use Symfony\Component\Process\ExecutableFinder;
 
 class Executables
@@ -15,6 +15,8 @@ class Executables
 
     /** @var array<string, string|null> */
     protected array $resolved = [];
+
+    public function __construct(protected MediaConfig $config) {}
 
     /**
      * The resolved path of the executable.
@@ -66,8 +68,6 @@ class Executables
 
     protected function configured(Executable $executable): string
     {
-        $configured = Config::get("media.executables.{$executable->value}");
-
-        return is_string($configured) && $configured !== '' ? $configured : $executable->value;
+        return $this->config->executable($executable);
     }
 }

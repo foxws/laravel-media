@@ -9,7 +9,7 @@ it('lists found and missing executables', function () {
     $ffmpeg = fakeExecutable(Executable::FFMpeg);
     $ffprobe = fakeExecutable(Executable::FFProbe);
     $packager = fakeExecutable(Executable::Packager);
-    config(['media.executables.ab-av1' => 'laravel-media-missing-ab-av1']);
+    mediaConfig(['media.executables.ab-av1' => 'laravel-media-missing-ab-av1']);
     Process::fake([
         '*ffmpeg*' => Process::result(output: "ffmpeg version 7.1.1\nbuilt with gcc"),
         '*' => Process::result(output: 'version 3.4.2'),

@@ -10,12 +10,12 @@ use Aws\S3\MultipartUploader;
 use Aws\S3\S3ClientInterface;
 use Foxws\Media\Concerns\ResolvesFromContainer;
 use Foxws\Media\Exceptions\ExportFailedException;
+use Foxws\Media\MediaConfig;
 use Generator;
 use GuzzleHttp\Promise\Create;
 use GuzzleHttp\Promise\EachPromise;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Filesystem\Filesystem;
-use Illuminate\Support\Facades\Config;
 use League\MimeTypeDetection\ExtensionMimeTypeDetector;
 use RuntimeException;
 use Symfony\Component\Finder\SplFileInfo;
@@ -24,6 +24,8 @@ use Throwable;
 class Exporter
 {
     use ResolvesFromContainer;
+
+    public function __construct(protected MediaConfig $config) {}
 
     /**
      * Copy every file in a local directory to a directory on the target disk.
@@ -79,7 +81,7 @@ class Exporter
         $client = $disk->s3Client();
         $bucket = $disk->s3Bucket();
         $options = $disk->s3UploadOptions();
-        $multipartThreshold = Config::integer('media.uploads.multipart_threshold', 64 * 1024 * 1024);
+        $multipartThreshold = $this->config->multipartThreshold;
 
         $acl = match ($visibility) {
             'public' => 'public-read',
@@ -134,7 +136,7 @@ class Exporter
             }
         })();
 
-        new EachPromise($uploads, ['concurrency' => Config::integer('media.uploads.concurrency', 10)])->promise()->wait();
+        new EachPromise($uploads, ['concurrency' => $this->config->uploadConcurrency])->promise()->wait();
 
         return $failures;
     }
@@ -148,8 +150,8 @@ class Exporter
     protected function multipartUpload(S3ClientInterface $client, mixed $stream, string $bucket, string $key, ?string $acl, array $parameters): PromiseInterface
     {
         $uploader = new MultipartUploader($client, $stream, [
-            'part_size' => Config::integer('media.uploads.multipart_part_size', 16 * 1024 * 1024),
-            'concurrency' => Config::integer('media.uploads.multipart_concurrency', 5),
+            'part_size' => $this->config->multipartPartSize,
+            'concurrency' => $this->config->multipartConcurrency,
             'bucket' => $bucket,
             'key' => $key,
             'acl' => $acl,

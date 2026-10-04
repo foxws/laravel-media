@@ -6,12 +6,13 @@ use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\MediaConfig;
 use Illuminate\Support\Facades\Storage;
 
 it('reads media on a local disk from its own path', function () {
     Storage::fake('videos')->put('movies/video.mp4', 'video');
 
-    $media = new Media(Disk::make('videos'), 'movies/video.mp4', app(TemporaryDirectories::class));
+    $media = new Media(Disk::make('videos'), 'movies/video.mp4', app(TemporaryDirectories::class), app(MediaConfig::class));
 
     expect($media->inputPath())->toBe(diskPath('videos', 'movies/video.mp4'))
         ->and($media->localPath())->toBe(diskPath('videos', 'movies/video.mp4'));
@@ -21,16 +22,16 @@ it('reads remote media through a temporary url instead of downloading it', funct
     $root = Storage::fake('remote-root')->path('');
     file_put_contents("{$root}/video.mp4", 'video');
 
-    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class));
+    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class), app(MediaConfig::class));
 
     expect($media->inputPath())->toBe('https://remote.test/video.mp4?signature=abc');
 });
 
 it('downloads remote media to a temporary directory when remote inputs are disabled', function () {
-    config(['media.remote_inputs.enabled' => false]);
+    mediaConfig(['media.remote_inputs.enabled' => false]);
     $root = Storage::fake('remote-root')->path('');
     file_put_contents("{$root}/video.mp4", 'video');
-    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class));
+    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class), app(MediaConfig::class));
 
     $input = $media->inputPath();
 
@@ -41,7 +42,7 @@ it('downloads remote media to a temporary directory when remote inputs are disab
 it('downloads remote media only once', function () {
     $root = Storage::fake('remote-root')->path('');
     file_put_contents("{$root}/video.mp4", 'video');
-    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class));
+    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class), app(MediaConfig::class));
     $first = $media->localPath();
     file_put_contents("{$root}/video.mp4", 'changed');
 
@@ -54,7 +55,7 @@ it('downloads remote media only once', function () {
 it('deletes the downloaded copy on cleanup', function () {
     $root = Storage::fake('remote-root')->path('');
     file_put_contents("{$root}/video.mp4", 'video');
-    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class));
+    $media = new Media(Disk::make(remoteDisk($root)), 'video.mp4', app(TemporaryDirectories::class), app(MediaConfig::class));
     $path = $media->localPath();
 
     $media->cleanup();
@@ -63,7 +64,7 @@ it('deletes the downloaded copy on cleanup', function () {
 });
 
 it('fails when remote media does not exist', function () {
-    $media = new Media(Disk::make(remoteDisk(Storage::fake('remote-root')->path(''))), 'missing.mp4', app(TemporaryDirectories::class));
+    $media = new Media(Disk::make(remoteDisk(Storage::fake('remote-root')->path(''))), 'missing.mp4', app(TemporaryDirectories::class), app(MediaConfig::class));
 
     $media->localPath();
 })->throws(MediaNotFoundException::class);

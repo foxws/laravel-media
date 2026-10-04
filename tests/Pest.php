@@ -7,6 +7,11 @@ use Aws\Result;
 use Aws\S3\Exception\S3Exception;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
+use Foxws\Media\Filesystem\Exporter;
+use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\MediaConfig;
+use Foxws\Media\Probe\Prober;
+use Foxws\Media\Process\Runner;
 use Foxws\Media\Tests\Fixtures\RemoteAdapter;
 use Foxws\Media\Tests\TestCase;
 use GuzzleHttp\Promise\Create;
@@ -38,9 +43,7 @@ function fakeExecutable(Executable $executable): string
     file_put_contents($path, PHP_OS_FAMILY === 'Windows' ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
     chmod($path, 0755);
 
-    config(["media.executables.{$executable->value}" => $path]);
-
-    app(Executables::class)->flush();
+    mediaConfig(["media.executables.{$executable->value}" => $path]);
 
     return $path;
 }
@@ -161,4 +164,18 @@ function runs(PendingProcess $process, Executable $executable): bool
 function diskPath(string $disk, string $path = ''): string
 {
     return str_replace('\\', '/', Storage::disk($disk)->path($path));
+}
+
+/**
+ * Change media config values and rebuild the services that read them once.
+ *
+ * @param  array<string, mixed>  $values
+ */
+function mediaConfig(array $values): void
+{
+    config($values);
+
+    foreach ([MediaConfig::class, Executables::class, Exporter::class, Runner::class, Prober::class, TemporaryDirectories::class] as $service) {
+        app()->forgetInstance($service);
+    }
 }

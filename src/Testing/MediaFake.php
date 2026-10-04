@@ -7,7 +7,6 @@ namespace Foxws\Media\Testing;
 use Closure;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\MediaFactory;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Assert as PHPUnit;
 
@@ -28,8 +27,12 @@ class MediaFake extends MediaFactory
 
     /**
      * @param  array<string, array<string, mixed>>  $probes  ffprobe output keyed by (the end of) a media path; see FakeProbe.
+     * @param  string  $defaultDisk  The disk assertSaved() and assertNotSaved() check when none is given.
      */
-    public function __construct(protected array $probes = []) {}
+    public function __construct(
+        protected array $probes = [],
+        protected string $defaultDisk = 'local',
+    ) {}
 
     /**
      * Fake ffprobe output for media whose path ends with the given path.
@@ -170,12 +173,12 @@ class MediaFake extends MediaFactory
      */
     public function assertSaved(string $path, ?string $disk = null): void
     {
-        Storage::disk($disk ?? $this->defaultDisk())->assertExists($path);
+        Storage::disk($disk ?? $this->defaultDisk)->assertExists($path);
     }
 
     public function assertNotSaved(string $path, ?string $disk = null): void
     {
-        Storage::disk($disk ?? $this->defaultDisk())->assertMissing($path);
+        Storage::disk($disk ?? $this->defaultDisk)->assertMissing($path);
     }
 
     /**
@@ -214,12 +217,5 @@ class MediaFake extends MediaFactory
         $input = str_replace('\\', '/', strtok($input, '?') ?: $input);
 
         return $input === $path || str_ends_with($input, '/'.ltrim($path, '/'));
-    }
-
-    protected function defaultDisk(): string
-    {
-        $disk = Config::get('media.disk');
-
-        return is_string($disk) && $disk !== '' ? $disk : Config::string('filesystems.default');
     }
 }

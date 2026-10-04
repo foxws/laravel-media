@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Filesystem;
 
 use Foxws\Media\Exceptions\MediaNotFoundException;
-use Illuminate\Support\Facades\Config;
+use Foxws\Media\MediaConfig;
 use Throwable;
 
 /**
@@ -21,6 +21,7 @@ class Media
         protected Disk $disk,
         protected string $path,
         protected TemporaryDirectories $directories,
+        protected MediaConfig $config,
     ) {}
 
     public function disk(): Disk
@@ -78,12 +79,12 @@ class Media
     public function inputPath(): string
     {
         if (! $this->disk->isLocal()
-            && Config::boolean('media.remote_inputs.enabled', true)
+            && $this->config->remoteInputs
             && $this->disk->providesTemporaryUrls()
         ) {
             return $this->disk->temporaryUrl(
                 $this->path,
-                now()->addSeconds(Config::integer('media.remote_inputs.url_lifetime', 3600)),
+                now()->addSeconds($this->config->remoteInputUrlLifetime),
             );
         }
 

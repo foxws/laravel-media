@@ -48,7 +48,7 @@ it('exposes the source disk and opened paths', function () {
 
 it('opens media from the configured default disk', function () {
     Storage::fake('archive');
-    config(['media.disk' => 'archive']);
+    mediaConfig(['media.disk' => 'archive']);
 
     expect(Media::open('a.mp4')->disk()->name())->toBe('archive');
 });
