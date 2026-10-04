@@ -12,6 +12,8 @@ use Foxws\Media\FFMpeg\Thumbnails;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\Http\DynamicDASHManifest;
+use Foxws\Media\Http\DynamicHLSPlaylist;
 use Foxws\Media\Packaging\Builder as PackagingBuilder;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;
@@ -185,6 +187,22 @@ class Opener
     public function exportAsStreams(string $playlist = 'master.m3u8', string $manifest = 'manifest.mpd'): PackagingBuilder
     {
         return $this->package()->addStreamsFrom()->withHlsPlaylist($playlist)->withDashManifest($manifest)->forVod();
+    }
+
+    /**
+     * Rewrite the opened HLS playlist (the first opened path) per request, e.g. to sign its URIs.
+     */
+    public function hlsPlaylist(): DynamicHLSPlaylist
+    {
+        return new DynamicHLSPlaylist($this->disk)->open($this->mediaFor()->path());
+    }
+
+    /**
+     * Rewrite the opened DASH manifest (the first opened path) per request, e.g. to sign its URIs.
+     */
+    public function dashManifest(): DynamicDASHManifest
+    {
+        return new DynamicDASHManifest($this->disk)->open($this->mediaFor()->path());
     }
 
     /**

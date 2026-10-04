@@ -189,3 +189,15 @@ function fakePackaging(array $probes = []): void
         return Process::result();
     }]);
 }
+
+/**
+ * Store the fixture playlists on a faked disk under videos/1.
+ */
+function storeStreams(string $disk = 'streams'): void
+{
+    Storage::fake($disk);
+
+    foreach (['master.m3u8', 'stream_0.m3u8', 'stream_1.m3u8', 'captions/stream_2.m3u8', 'manifest.mpd'] as $file) {
+        Storage::disk($disk)->put("videos/1/{$file}", file_get_contents(fixture("streams/{$file}")));
+    }
+}
