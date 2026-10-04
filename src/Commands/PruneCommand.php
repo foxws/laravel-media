@@ -27,7 +27,7 @@ class PruneCommand extends Command
 
         $stale = array_values(array_filter(
             $disk->allFiles($prefix),
-            fn (string $path): bool => in_array(pathinfo($path, PATHINFO_EXTENSION), ['ts', 'm4s', 'mp4'], true) && $disk->lastModified($path) <= $cutoff,
+            fn (string $path): bool => in_array(pathinfo($path, PATHINFO_EXTENSION), ['ts', 'm4s', 'mp4', 'vtt'], true) && $disk->lastModified($path) <= $cutoff,
         ));
 
         if (! $this->option('dry-run')) {

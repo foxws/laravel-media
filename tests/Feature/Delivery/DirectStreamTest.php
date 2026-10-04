@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Delivery\Segment;
+use Foxws\Media\Delivery\Subtitle;
 use Foxws\Media\Delivery\Track;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -376,3 +377,103 @@ it('serves encrypted streams with mpeg-ts segments only', function () {
         ->and(fn () => $stream->fragmented()->masterPlaylist(fn () => 'playlist'))->toThrow(InvalidArgumentException::class)
         ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidArgumentException::class);
 });
+
+it('offers added files and embedded text streams as subtitle renditions', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13, subtitles: ['eng', 'nld'])]);
+    Storage::disk('videos')->put('captions/de.vtt', "WEBVTT\n\n00:00.000 --> 00:01.000\nHallo");
+
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->withSubtitles('captions/de.vtt', 'deu', 'Deutsch')
+        ->withEmbeddedSubtitles();
+
+    expect(array_map(fn (Subtitle $subtitle) => [$subtitle->label, $subtitle->language, $subtitle->stream], $stream->subtitles()))->toBe([
+        ['Deutsch', 'deu', null],
+        ['eng', 'eng', 2],
+        ['nld', 'nld', 3],
+    ]);
+
+    $playlist = $stream->masterPlaylist(fn (int $variant) => "{$variant}.m3u8", fn (int $subtitle) => "subtitles/{$subtitle}.m3u8");
+
+    expect($playlist)->toContain(
+        '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="Deutsch",LANGUAGE="deu",DEFAULT=NO,AUTOSELECT=YES,URI="subtitles/0.m3u8"',
+        'URI="subtitles/2.m3u8"',
+        'CODECS="avc1.640028,mp4a.40.2",SUBTITLES="subtitles"',
+    )->and($stream->fragmented()->masterPlaylist(fn (int $variant) => "{$variant}.m3u8", fn (int $subtitle) => "subtitles/{$subtitle}.m3u8"))
+        ->toContain('AUDIO="audio",SUBTITLES="subtitles"');
+});
+
+it('needs subtitle urls when the stream has subtitles', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('en.vtt', 'en');
+
+    expect(fn () => $stream->masterPlaylist(fn () => 'playlist'))->toThrow(InvalidArgumentException::class, 'URLs of their playlists')
+        ->and(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'URLs of their WebVTT files');
+});
+
+it('lists a subtitle track as one segment in its media playlist', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13.5)]);
+
+    $playlist = Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('en.vtt')->subtitlePlaylist(0, 'en.vtt');
+
+    expect($playlist)->toBe(implode("\n", [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:14',
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+        '#EXTINF:13.500000,',
+        'en.vtt',
+        '#EXT-X-ENDLIST',
+        '',
+    ]));
+});
+
+it('maps subtitle cues onto the segment timestamps for hls', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::disk('videos')->put('en.vtt', "\u{FEFF}WEBVTT - English\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n\n00:00.000 --> 00:01.000\nHello");
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('en.vtt');
+
+    $cmaf = $stream->subtitleResponse(0, timestampOffset: 10);
+    $dash = $stream->subtitleResponse(0);
+
+    expect($cmaf->getContent())->toBe("WEBVTT - English\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:00.000 --> 00:01.000\nHello")
+        ->and($cmaf->headers->get('Content-Type'))->toBe('text/vtt; charset=utf-8')
+        ->and($dash->getContent())->toBe(Storage::disk('videos')->get('en.vtt'));
+});
+
+it('converts an embedded subtitle stream to webvtt once', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(subtitles: ['eng'])]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEmbeddedSubtitles();
+
+    $stream->subtitle(0);
+    $stream->subtitle(0);
+
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 7, -1) === ['-map', '0:2', '-c:s', 'webvtt', '-f', 'webvtt']);
+    expect(Storage::disk('segments')->allFiles())->toHaveCount(1)
+        ->and(Storage::disk('segments')->allFiles()[0])->toMatch('#^media-segments/[0-9a-f]{32}/subtitles/2\.vtt$#');
+});
+
+it('adds subtitles to the dash manifest as webvtt files', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $manifest = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->withSubtitles('en.vtt', 'en', 'English & more')
+        ->dashManifest(fn () => 'init', fn () => 'segment', fn (int $subtitle) => "subtitles/{$subtitle}.vtt?a=1&b=2");
+
+    expect($manifest)->toContain(implode("\n", [
+        '    <AdaptationSet id="2" contentType="text" mimeType="text/vtt" lang="en">',
+        '      <Label>English &amp; more</Label>',
+        '      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="subtitle"/>',
+        '      <Representation id="text-0" bandwidth="256">',
+        '        <BaseURL>subtitles/0.vtt?a=1&amp;b=2</BaseURL>',
+        '      </Representation>',
+        '    </AdaptationSet>',
+    ]));
+});
+
+it('throws a 404 for subtitles that do not exist', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+
+    Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('missing.vtt')->subtitle(1);
+})->throws(SegmentNotFoundException::class, "Subtitle 1 doesn't exist.");
