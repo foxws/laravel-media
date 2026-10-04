@@ -178,3 +178,13 @@ it('writes placeholder segments and manifests for packaging', function () {
     Media::assertSaved('streams/0_video.mp4', 'media');
     Media::assertRan(Executable::Packager, fn (array $arguments) => in_array('--allow_codec_switching', $arguments, true));
 });
+
+it('fakes a keyframe every two seconds', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    Storage::fake('media');
+
+    $index = Media::fromDisk('media')->open('video.mp4')->keyframes();
+
+    expect($index->keyframes)->toBe([0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0])
+        ->and(count($index->segments(6)))->toBe(3);
+});

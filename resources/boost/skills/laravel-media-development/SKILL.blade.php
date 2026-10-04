@@ -63,6 +63,22 @@ $result->paths();  // every written path
 - `command('out.mp4')` returns the full command line with keys redacted, without running it.
 - Temporary files, including downloaded remote inputs, are deleted after every queue job and at the end of each request. Call `$media->cleanupTemporaryFiles()` to free them earlier, for example between steps of a long job.
 
+## Keyframes and segments
+
+`keyframes()` lists where a video's keyframes are, by reading its packets with ffprobe (no decoding, so it's fast even for long files). Segments cut on keyframes can be copied without re-encoding, which is what streaming straight from the stored file relies on.
+
+@boostsnippet("Keyframes", "php")
+$index = Media::fromDisk('s3')->open('videos/movie.mp4')->keyframes();
+
+$index->keyframes;          // [0.0, 2.002, 4.004, ...] seconds
+$index->segments(6);        // list<Segment> (index, start, duration, end()), each at least 6s and starting on a keyframe
+$index->longestSegment(6);  // the HLS target duration
+@endboostsnippet
+
+- Indexes are cached on the opener and in `media.delivery.cache_store` (null for the default store) for `media.delivery.index_lifetime` seconds, keyed by disk, path, size and modification time, so a changed file is indexed again.
+- Audio-only files have no keyframes and are split into even segments.
+- `media.delivery.segment_duration` (`MEDIA_DELIVERY_SEGMENT_DURATION`, 6) is the default target length.
+
 ## Scenes, clips and reels
 
 @boostsnippet("A reel from scenes", "php")
@@ -411,6 +427,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `disk` | Default disk for `Media::open()` (`MEDIA_DISK`) |
 | `packager.default` | Packager driver (`MEDIA_PACKAGER`, `shaka`) |
 | `executables.ffmpeg`, `.ffprobe`, `.packager`, `.ab-av1` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
+| `delivery.segment_duration`, `.cache_store`, `.index_lifetime` | Segment length and keyframe index caching for streaming from stored files |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |
