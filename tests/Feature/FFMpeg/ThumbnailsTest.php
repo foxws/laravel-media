@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Events\ExportCompleted;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Filters\Tonemap;
 use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
@@ -163,4 +165,14 @@ it('tone maps hdr videos by default, unless turned off', function () {
     Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
         && str_ends_with(end($process->command), 'original_%03d.jpg')
         && ! str_contains($process->command[array_search('-vf', $process->command, true) + 1], 'tonemap'));
+});
+
+it('passes its context to the export events', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+    Event::fake([ExportCompleted::class]);
+
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->withContext(['video_id' => 7])->save('storyboard');
+
+    Event::assertDispatched(ExportCompleted::class, fn (ExportCompleted $event) => $event->context === ['video_id' => 7]);
 });

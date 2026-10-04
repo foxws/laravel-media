@@ -17,6 +17,7 @@ enum FailureReason: string
     case NoSpace = 'no_space';
     case Network = 'network';
     case Timeout = 'timeout';
+    case Cancelled = 'cancelled';
     case Unknown = 'unknown';
 
     /**

@@ -42,6 +42,15 @@ class ProcessFailedException extends RuntimeException
         );
     }
 
+    public static function cancelled(Result $result): self
+    {
+        return new self(
+            sprintf('%s was cancelled.', $result->executable->value),
+            $result,
+            FailureReason::Cancelled,
+        );
+    }
+
     /**
      * Whether a retry may succeed, e.g. to decide between release() and fail() in a job.
      */

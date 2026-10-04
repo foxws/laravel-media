@@ -3,6 +3,10 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Events\ExportCompleted;
+use Foxws\Media\Events\ExportFailed;
+use Foxws\Media\Events\ProgressReported;
+use Foxws\Media\Exceptions\FailureReason;
 use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -21,6 +25,7 @@ use Foxws\Media\Filters\ToneMapAlgorithm;
 use Foxws\Media\Filters\Volume;
 use Foxws\Media\Process\Progress;
 use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
@@ -512,4 +517,70 @@ it('uses the configured ffmpeg log level', function () {
     $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->arguments('out.mp4');
 
     expect(array_slice($arguments, 3, 2))->toBe(['-loglevel', 'warning']);
+});
+
+it('dispatches an export completed event with the context, paths and duration', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+    Event::fake([ExportCompleted::class, ExportFailed::class]);
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->withContext(['video_id' => 1])
+        ->withContext(['step' => 'clip'])
+        ->save('clip.mp4');
+
+    Event::assertDispatched(ExportCompleted::class, fn (ExportCompleted $event) => $event->context === ['video_id' => 1, 'step' => 'clip']
+        && $event->result->paths() === ['clip.mp4']
+        && $event->duration > 0);
+    Event::assertNotDispatched(ExportFailed::class);
+});
+
+it('dispatches an export failed event when ffmpeg fails', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    Process::fake(['*' => Process::result(errorOutput: 'Invalid data found when processing input', exitCode: 1)]);
+    Event::fake([ExportCompleted::class, ExportFailed::class]);
+
+    rescue(fn () => Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->withContext(['video_id' => 1])->save('clip.mp4'), report: false);
+
+    Event::assertDispatched(ExportFailed::class, fn (ExportFailed $event) => $event->context === ['video_id' => 1]
+        && $event->exception instanceof ProcessFailedException);
+    Event::assertNotDispatched(ExportCompleted::class);
+});
+
+it('reports progress events when something listens, even without a callback', function () {
+    fakeProbes(['video.mp4' => videoProbe(duration: 40)], "out_time_us=10000000\nprogress=continue\n");
+    Storage::fake('videos');
+    $reported = [];
+    Event::listen(ProgressReported::class, function (ProgressReported $event) use (&$reported) {
+        $reported[] = [$event->progress->percentage(), $event->context];
+    });
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->withContext(['video_id' => 1])->save('out.mp4');
+
+    expect($reported)->toBe([[25.0, ['video_id' => 1]]]);
+});
+
+it('cancels the export when a progress callback returns false', function () {
+    fakeProbes(['video.mp4' => videoProbe(duration: 40)], "out_time_us=10000000\nprogress=continue\nout_time_us=20000000\nprogress=continue\n");
+    Storage::fake('videos');
+    Event::fake([ExportFailed::class]);
+    $seen = 0;
+
+    $save = function () use (&$seen) {
+        Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+            ->onProgress(function () use (&$seen) {
+                $seen++;
+
+                return false;
+            })
+            ->save('out.mp4');
+    };
+
+    expect($save)->toThrow(fn (ProcessFailedException $exception) => expect($exception->reason)->toBe(FailureReason::Cancelled));
+
+    expect($seen)->toBe(1);
+    Storage::disk('videos')->assertMissing('out.mp4');
+    Event::assertDispatched(ExportFailed::class);
 });

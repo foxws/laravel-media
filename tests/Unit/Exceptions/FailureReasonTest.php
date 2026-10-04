@@ -22,7 +22,8 @@ it('recognises why ffmpeg failed from its error output', function (string $outpu
     'anything else' => ['Conversion failed!', FailureReason::Unknown, true],
 ]);
 
-it('retries timeouts but not broken input', function () {
+it('retries timeouts but not broken input or cancelled runs', function () {
     expect(FailureReason::Timeout->isRetryable())->toBeTrue()
-        ->and(FailureReason::InvalidInput->isRetryable())->toBeFalse();
+        ->and(FailureReason::InvalidInput->isRetryable())->toBeFalse()
+        ->and(FailureReason::Cancelled->isRetryable())->toBeFalse();
 });
