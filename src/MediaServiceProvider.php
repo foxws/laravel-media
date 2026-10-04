@@ -146,7 +146,8 @@ class MediaServiceProvider extends ServiceProvider
      * cmaf.m3u8 and dash.mpd with {variant}/{track}/index.m3u8, {variant}/{track}/init.mp4 and
      * {variant}/{track}/{segment}.m4s, and hls.m3u8 with {variant}/index.m3u8, {variant}/{segment}.ts
      * and {variant}/keys/{period}.key. Subtitles are served as subtitles/{subtitle}/{format}.m3u8 and
-     * subtitles/{subtitle}/{format}.vtt for HLS, and subtitles/{subtitle}.vtt for DASH.
+     * subtitles/{subtitle}/{format}.vtt for HLS, and subtitles/{subtitle}.vtt for DASH. Thumbnails are
+     * served as thumbnails.m3u8 and thumbnails/{sheet}.{jpg|webp}.
      */
     protected function registerRouteMacro(): void
     {
@@ -188,6 +189,12 @@ class MediaServiceProvider extends ServiceProvider
 
                 $router->get('subtitles/{subtitle}.vtt', [MediaStreamController::class, 'subtitle'])
                     ->name('subtitle')->defaults('mediaStream', $stream)->whereNumber('subtitle');
+
+                $router->get('thumbnails.m3u8', [MediaStreamController::class, 'thumbnailPlaylist'])
+                    ->name('thumbnail-playlist')->defaults('mediaStream', $stream);
+
+                $router->get('thumbnails/{sheet}.{extension}', [MediaStreamController::class, 'thumbnail'])
+                    ->name('thumbnail')->defaults('mediaStream', $stream)->whereNumber('sheet')->whereIn('extension', ['jpg', 'webp']);
             });
         });
     }

@@ -21,11 +21,12 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Serves the routes of Route::mediaStream(): HLS with fragmented MP4 (CMAF) or MPEG-TS segments,
- * DASH with the same fragmented MP4 segments, WebVTT subtitles, and the keys of encrypted MPEG-TS streams.
+ * DASH with the same fragmented MP4 segments, WebVTT subtitles, thumbnail sprite sheets, and the keys of
+ * encrypted MPEG-TS streams.
  */
 class MediaStreamController
 {
-    protected const array STREAM_PARAMETERS = ['mediaStream', 'variant', 'track', 'segment', 'period', 'subtitle', 'format'];
+    protected const array STREAM_PARAMETERS = ['mediaStream', 'variant', 'track', 'segment', 'period', 'subtitle', 'format', 'sheet', 'extension'];
 
     public function __construct(protected StreamRegistry $streams) {}
 
@@ -54,6 +55,7 @@ class MediaStreamController
                 ? $this->url($request, $definition, 'track-playlist', ['variant' => $variant, 'track' => $track->value])
                 : $this->url($request, $definition, 'playlist', ['variant' => $variant]),
             fn (int $subtitle): string => $this->url($request, $definition, 'subtitle-playlist', ['subtitle' => $subtitle, 'format' => $fragmented ? 'cmaf' : 'hls']),
+            fn (): string => $this->url($request, $definition, 'thumbnail-playlist', []),
         ));
     }
 
@@ -94,6 +96,7 @@ class MediaStreamController
             fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->value]),
             fn (Segment $segment, int $variant, Track $track): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->value, 'segment' => $segment->index]),
             fn (int $subtitle): string => $this->url($request, $definition, 'subtitle', ['subtitle' => $subtitle]),
+            fn (int $sheet): string => $this->thumbnailUrl($request, $definition, $stream, $sheet),
         ), 200, [
             'Content-Type' => 'application/dash+xml',
             'Cache-Control' => 'private, no-cache',
@@ -135,6 +138,25 @@ class MediaStreamController
         [, $stream] = $this->resolve($request);
 
         return $stream->subtitleResponse($this->number($request, 'subtitle'));
+    }
+
+    /**
+     * The HLS image playlist of the thumbnails.
+     */
+    public function thumbnailPlaylist(Request $request): Response
+    {
+        [$definition, $stream] = $this->resolve($request);
+
+        return $this->playlistResponse($stream->thumbnailPlaylist(
+            fn (int $sheet): string => $this->thumbnailUrl($request, $definition, $stream, $sheet),
+        ));
+    }
+
+    public function thumbnail(Request $request): Response
+    {
+        [, $stream] = $this->resolve($request);
+
+        return $stream->thumbnailResponse($this->number($request, 'sheet'));
     }
 
     public function init(Request $request): Response
@@ -204,6 +226,11 @@ class MediaStreamController
         return $definition->isSigned()
             ? URL::temporarySignedRoute($name, now()->addSeconds($definition->lifetime()), $parameters)
             : URL::route($name, $parameters);
+    }
+
+    protected function thumbnailUrl(Request $request, StreamDefinition $definition, DirectStream $stream, int $sheet): string
+    {
+        return $this->url($request, $definition, 'thumbnail', ['sheet' => $sheet, 'extension' => $stream->thumbnails()?->extension() ?? 'jpg']);
     }
 
     protected function playlistResponse(string $playlist): Response
