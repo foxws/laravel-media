@@ -112,3 +112,18 @@ it('picks the segment format by route, whatever the resolver set', function () {
     $this->get('videos/1/hls.m3u8')->assertSee(['#EXT-X-VERSION:3', 'http://localhost/videos/1/0/index.m3u8']);
     $this->get('videos/1/0/index.m3u8')->assertSee('http://localhost/videos/1/0/0.ts');
 });
+
+it('serves subtitles for cmaf, mpeg-ts and dash', function () {
+    Storage::disk('videos')->put('captions/en.vtt', "WEBVTT\n\n00:00.000 --> 00:01.000\nHello");
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()->withSubtitles('captions/en.vtt', 'en', 'English'));
+
+    $this->get('videos/1/cmaf.m3u8')->assertSee('URI="http://localhost/videos/1/subtitles/0/cmaf.m3u8"', escape: false);
+    $this->get('videos/1/hls.m3u8')->assertSee('URI="http://localhost/videos/1/subtitles/0/hls.m3u8"', escape: false);
+    $this->get('videos/1/subtitles/0/cmaf.m3u8')->assertSee('http://localhost/videos/1/subtitles/0/cmaf.vtt');
+    $this->get('videos/1/dash.mpd')->assertSee('<BaseURL>http://localhost/videos/1/subtitles/0.vtt</BaseURL>', escape: false);
+
+    $this->get('videos/1/subtitles/0/cmaf.vtt')->assertSee('X-TIMESTAMP-MAP=MPEGTS:900000');
+    $this->get('videos/1/subtitles/0/hls.vtt')->assertSee('X-TIMESTAMP-MAP=MPEGTS:0,');
+    $this->get('videos/1/subtitles/0.vtt')->assertDontSee('X-TIMESTAMP-MAP');
+    $this->get('videos/1/subtitles/1.vtt')->assertNotFound();
+});

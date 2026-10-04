@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Http\Controllers;
 
 use Foxws\Media\Delivery\DirectStream;
+use Foxws\Media\Delivery\FragmentedMp4;
 use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Delivery\StreamDefinition;
 use Foxws\Media\Delivery\StreamRegistry;
@@ -20,11 +21,11 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Serves the routes of Route::mediaStream(): HLS with fragmented MP4 (CMAF) or MPEG-TS segments,
- * DASH with the same fragmented MP4 segments, and the keys of encrypted MPEG-TS streams.
+ * DASH with the same fragmented MP4 segments, WebVTT subtitles, and the keys of encrypted MPEG-TS streams.
  */
 class MediaStreamController
 {
-    protected const array STREAM_PARAMETERS = ['mediaStream', 'variant', 'track', 'segment', 'period'];
+    protected const array STREAM_PARAMETERS = ['mediaStream', 'variant', 'track', 'segment', 'period', 'subtitle', 'format'];
 
     public function __construct(protected StreamRegistry $streams) {}
 
@@ -52,6 +53,7 @@ class MediaStreamController
             fn (int $variant, ?Track $track): string => $track !== null
                 ? $this->url($request, $definition, 'track-playlist', ['variant' => $variant, 'track' => $track->value])
                 : $this->url($request, $definition, 'playlist', ['variant' => $variant]),
+            fn (int $subtitle): string => $this->url($request, $definition, 'subtitle-playlist', ['subtitle' => $subtitle, 'format' => $fragmented ? 'cmaf' : 'hls']),
         ));
     }
 
@@ -91,10 +93,48 @@ class MediaStreamController
         return new Response($stream->dashManifest(
             fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->value]),
             fn (Segment $segment, int $variant, Track $track): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->value, 'segment' => $segment->index]),
+            fn (int $subtitle): string => $this->url($request, $definition, 'subtitle', ['subtitle' => $subtitle]),
         ), 200, [
             'Content-Type' => 'application/dash+xml',
             'Cache-Control' => 'private, no-cache',
         ]);
+    }
+
+    /**
+     * The HLS media playlist of a subtitle track, for CMAF or MPEG-TS playlists.
+     */
+    public function subtitlePlaylist(Request $request): Response
+    {
+        [$definition, $stream] = $this->resolve($request);
+        $subtitle = $this->number($request, 'subtitle');
+
+        return $this->playlistResponse($stream->subtitlePlaylist(
+            $subtitle,
+            $this->url($request, $definition, 'hls-subtitle', ['subtitle' => $subtitle, 'format' => $this->parameter($request, 'format')]),
+        ));
+    }
+
+    /**
+     * A subtitle track for HLS, mapped onto the timestamps of the CMAF or MPEG-TS segments.
+     */
+    public function hlsSubtitle(Request $request): Response
+    {
+        [, $stream] = $this->resolve($request);
+
+        return $stream->subtitleResponse(
+            $this->number($request, 'subtitle'),
+            $this->parameter($request, 'format') === 'cmaf' ? FragmentedMp4::TIMESTAMP_OFFSET : 0,
+        );
+    }
+
+    /**
+     * A subtitle track for DASH, timed from the start of the presentation.
+     */
+    public function subtitle(Request $request): Response
+    {
+        [, $stream] = $this->resolve($request);
+
+        return $stream->subtitleResponse($this->number($request, 'subtitle'));
     }
 
     public function init(Request $request): Response

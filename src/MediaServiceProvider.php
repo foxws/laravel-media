@@ -145,7 +145,8 @@ class MediaServiceProvider extends ServiceProvider
      * Route::mediaStream('videos/{video}', 'videos') serves a stream defined with MediaStream::define():
      * cmaf.m3u8 and dash.mpd with {variant}/{track}/index.m3u8, {variant}/{track}/init.mp4 and
      * {variant}/{track}/{segment}.m4s, and hls.m3u8 with {variant}/index.m3u8, {variant}/{segment}.ts
-     * and {variant}/keys/{period}.key.
+     * and {variant}/keys/{period}.key. Subtitles are served as subtitles/{subtitle}/{format}.m3u8 and
+     * subtitles/{subtitle}/{format}.vtt for HLS, and subtitles/{subtitle}.vtt for DASH.
      */
     protected function registerRouteMacro(): void
     {
@@ -178,6 +179,15 @@ class MediaServiceProvider extends ServiceProvider
 
                 $router->get('{variant}/{track}/{segment}.m4s', [MediaStreamController::class, 'fragment'])
                     ->name('fragment')->defaults('mediaStream', $stream)->whereNumber(['variant', 'segment'])->whereIn('track', ['video', 'audio']);
+
+                $router->get('subtitles/{subtitle}/{format}.m3u8', [MediaStreamController::class, 'subtitlePlaylist'])
+                    ->name('subtitle-playlist')->defaults('mediaStream', $stream)->whereNumber('subtitle')->whereIn('format', ['cmaf', 'hls']);
+
+                $router->get('subtitles/{subtitle}/{format}.vtt', [MediaStreamController::class, 'hlsSubtitle'])
+                    ->name('hls-subtitle')->defaults('mediaStream', $stream)->whereNumber('subtitle')->whereIn('format', ['cmaf', 'hls']);
+
+                $router->get('subtitles/{subtitle}.vtt', [MediaStreamController::class, 'subtitle'])
+                    ->name('subtitle')->defaults('mediaStream', $stream)->whereNumber('subtitle');
             });
         });
     }
