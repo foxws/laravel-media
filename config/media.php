@@ -104,6 +104,10 @@ return [
     | The minimum free space settings (in bytes) make a job fail early when a
     | size-limited mount is full. Set them to 0 to disable the check.
     |
+    | Temporary directories are deleted after every queue job when
+    | cleanup_after_jobs is enabled. Schedule "media:clean" to remove what's
+    | left behind after a crash.
+    |
     */
 
     'temporary_files' => [
@@ -112,6 +116,7 @@ return [
         'size_multiplier' => (float) env('MEDIA_TEMPORARY_FILES_SIZE_MULTIPLIER', 1.5),
         'cache_root' => env('MEDIA_CACHE_FILES_ROOT'),
         'cache_min_free' => (int) env('MEDIA_CACHE_FILES_MIN_FREE', 0),
+        'cleanup_after_jobs' => (bool) env('MEDIA_CLEANUP_AFTER_JOBS', true),
     ],
 
     /*
@@ -125,6 +130,9 @@ return [
     | `multipart_concurrency` parts at a time. Multipart uploads are required
     | for objects over 5 GB, and failed ones are aborted.
     |
+    | When a file fails to upload, rollback_on_failure deletes the files of
+    | the same export that did reach the disk, so no half result is left.
+    |
     | Other disks receive files one at a time.
     |
     */
@@ -134,6 +142,7 @@ return [
         'multipart_threshold' => (int) env('MEDIA_UPLOADS_MULTIPART_THRESHOLD', 64 * 1024 * 1024),
         'multipart_part_size' => (int) env('MEDIA_UPLOADS_MULTIPART_PART_SIZE', 16 * 1024 * 1024),
         'multipart_concurrency' => (int) env('MEDIA_UPLOADS_MULTIPART_CONCURRENCY', 5),
+        'rollback_on_failure' => (bool) env('MEDIA_UPLOADS_ROLLBACK_ON_FAILURE', true),
     ],
 
 ];

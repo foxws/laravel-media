@@ -12,6 +12,8 @@ use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
+use Illuminate\Process\FakeInvokedProcess;
+use Illuminate\Process\InvokedProcess;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Psr\Log\LoggerInterface;
@@ -26,6 +28,9 @@ class Runner
      * @var list<string>
      */
     protected const array SENSITIVE_OPTIONS = ['keys', 'key', 'key_id', 'pssh', 'protection_systems', 'raw_key', 'iv', 'decryption_key'];
+
+    /** @var array<int, \Illuminate\Contracts\Process\InvokedProcess> */
+    protected array $running = [];
 
     public function __construct(
         protected Executables $executables,
@@ -113,15 +118,40 @@ class Runner
      */
     protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
     {
-        $result = Process::timeout($timeout)
-            ->start($command)
-            ->wait(function (string $type, string $output) use ($onOutput): void {
+        $process = Process::timeout($timeout)->start($command);
+
+        $this->running[spl_object_id($process)] = $process;
+
+        try {
+            $result = $process->wait(function (string $type, string $output) use ($onOutput): void {
                 if ($type === 'out' && $onOutput !== null) {
                     $onOutput($output);
                 }
             });
+        } finally {
+            unset($this->running[spl_object_id($process)]);
+        }
 
         return [$result->exitCode() ?? 1, $result->output(), $result->errorOutput()];
+    }
+
+    /**
+     * Stop the processes that are still running, e.g. when a queue worker is about to be killed,
+     * so ffmpeg doesn't keep running as an orphan. They get SIGTERM, then SIGKILL after the timeout.
+     */
+    public function stopRunning(float $timeout = 3.0): void
+    {
+        foreach ($this->running as $process) {
+            if (! $process->running()) {
+                continue;
+            }
+
+            if ($process instanceof InvokedProcess || $process instanceof FakeInvokedProcess) {
+                $process->stop($timeout);
+            } else {
+                $process->signal(15);
+            }
+        }
     }
 
     /**

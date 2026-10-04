@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media;
 
+use Foxws\Media\Commands\CleanCommand;
 use Foxws\Media\Commands\InfoCommand;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\Disk;
@@ -12,6 +13,10 @@ use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Probe\Prober;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Queue\Events\JobExceptionOccurred;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobTimedOut;
+use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\ServiceProvider;
 use Psr\Log\LoggerInterface;
@@ -58,17 +63,44 @@ class MediaServiceProvider extends ServiceProvider
     {
         $this->app->terminating(fn () => $this->app->make(TemporaryDirectories::class)->deleteAll());
 
+        $this->cleanUpAfterQueueJobs();
+
         if (! $this->app->runningInConsole()) {
             return;
         }
 
         $this->commands([
+            CleanCommand::class,
             InfoCommand::class,
         ]);
 
         $this->publishes([
             __DIR__.'/../config/media.php' => config_path('media.php'),
         ], ['media', 'media-config']);
+    }
+
+    /**
+     * Queue workers don't terminate between jobs, so delete each job's temporary directories when
+     * it finishes. When a job times out, the worker kills itself right after, so stop the running
+     * ffmpeg first, which would otherwise keep running as an orphan.
+     */
+    protected function cleanUpAfterQueueJobs(): void
+    {
+        $events = $this->app->make('events');
+
+        $events->listen([JobProcessed::class, JobExceptionOccurred::class], function (): void {
+            if (Config::boolean('media.temporary_files.cleanup_after_jobs', true)) {
+                $this->app->make(TemporaryDirectories::class)->deleteAll();
+            }
+        });
+
+        $events->listen([JobTimedOut::class, WorkerStopping::class], function (): void {
+            if ($this->app->resolved(Runner::class)) {
+                $this->app->make(Runner::class)->stopRunning();
+            }
+
+            $this->app->make(TemporaryDirectories::class)->deleteAll();
+        });
     }
 
     protected function logger(Application $app): ?LoggerInterface

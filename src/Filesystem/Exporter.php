@@ -60,10 +60,40 @@ class Exporter
         };
 
         if ($failures !== []) {
+            if (Config::boolean('media.uploads.rollback_on_failure', true)) {
+                $this->rollback($operations, $failures, $target);
+            }
+
             throw ExportFailedException::copyFailed($target->name(), $failures);
         }
 
         return array_map(fn (FileOperation $operation): string => $operation->targetPath, $operations);
+    }
+
+    /**
+     * Delete the files that did reach the target, so a failed export leaves no half result behind.
+     *
+     * @param  list<FileOperation>  $operations
+     * @param  list<CopyFailure>  $failures
+     */
+    protected function rollback(array $operations, array $failures, Disk $target): void
+    {
+        $failed = array_map(fn (CopyFailure $failure): string => $failure->target, $failures);
+
+        $written = array_values(array_filter(
+            array_map(fn (FileOperation $operation): string => $operation->targetPath, $operations),
+            fn (string $path): bool => ! in_array($path, $failed, true),
+        ));
+
+        if ($written === []) {
+            return;
+        }
+
+        try {
+            $target->delete($written);
+        } catch (Throwable) {
+            // The export already failed; leftovers are overwritten by a retry.
+        }
     }
 
     /**
