@@ -30,3 +30,15 @@ it('derives the same key for the same secret and context', function () {
 it('needs a secret to derive a key', function () {
     EncryptionKey::derive('', 'video:1');
 })->throws(InvalidArgumentException::class, 'needs a secret');
+
+it('formats the key id as a uuid', function () {
+    $key = new EncryptionKey(str_repeat('0', 32), '0123456789abcdef0123456789abcdef');
+
+    expect($key->keyIdUuid())->toBe('01234567-89ab-cdef-0123-456789abcdef');
+});
+
+it('describes the key as a json web key with base64url values', function () {
+    $key = new EncryptionKey('fbfeffffffffffffffffffffffffffff', '00000000000000000000000000000001');
+
+    expect($key->toJsonWebKey())->toBe(['kty' => 'oct', 'kid' => 'AAAAAAAAAAAAAAAAAAAAAQ', 'k' => '-_7__________________w']);
+});

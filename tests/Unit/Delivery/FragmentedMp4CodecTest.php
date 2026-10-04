@@ -18,3 +18,14 @@ it('supports the codecs fragmented mp4 can carry', function (?string $codec, boo
     'vorbis' => ['vorbis', false],
     'unknown' => [null, false],
 ]);
+
+it('encrypts every codec but those whose frame headers have to stay readable', function (FragmentedMp4Codec $codec, bool $encryptable) {
+    expect($codec->isEncryptable())->toBe($encryptable);
+})->with([
+    'h264' => [FragmentedMp4Codec::H264, true],
+    'hevc' => [FragmentedMp4Codec::Hevc, true],
+    'aac' => [FragmentedMp4Codec::Aac, true],
+    'opus' => [FragmentedMp4Codec::Opus, true],
+    'av1' => [FragmentedMp4Codec::Av1, false],
+    'vp9' => [FragmentedMp4Codec::Vp9, false],
+]);
