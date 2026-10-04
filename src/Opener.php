@@ -7,8 +7,11 @@ namespace Foxws\Media;
 use Foxws\Media\Delivery\DirectStream;
 use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Delivery\KeyframeIndexer;
+use Foxws\Media\Encoding\Ladder;
+use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\FFMpeg\FFMpegBuilder;
+use Foxws\Media\FFMpeg\Output;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\SceneDetector;
 use Foxws\Media\FFMpeg\Thumbnails;
@@ -164,6 +167,31 @@ class Opener
     public function ffmpeg(): FFMpegBuilder
     {
         return app(FFMpegBuilder::class, ['opener' => $this]);
+    }
+
+    /**
+     * Encode the (first) opened file into every rendition of the ladder that fits its size, in one
+     * ffmpeg run with an output per rendition, e.g. ladder(Ladder::standard())->toDisk('renditions')->save().
+     * The output paths replace {height} and {bitrate} in the pattern.
+     *
+     * @throws InvalidMediaException
+     */
+    public function ladder(Ladder $ladder, string $path = '{height}p.mp4'): FFMpegBuilder
+    {
+        $source = $this->probe()->videoStream() ?? throw InvalidMediaException::noVideo($this->mediaFor()->path());
+        $builder = $this->ffmpeg()->addInputArgs($ladder->acceleration()->inputArguments());
+
+        foreach ($ladder->for($source) as $rendition) {
+            $builder->addOutput(
+                strtr($path, ['{height}' => (string) $rendition->height, '{bitrate}' => (string) $rendition->bitrate]),
+                fn (Output $output): Output => $output
+                    ->map('0:v:0', '0:a:0?')
+                    ->addFilter($ladder->scale($rendition, $source))
+                    ->inFormat($ladder->format($rendition)),
+            );
+        }
+
+        return $builder;
     }
 
     /**

@@ -2,11 +2,15 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Encoding\HardwareAcceleration;
+use Foxws\Media\Encoding\Ladder;
+use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\MediaFactory;
 use Foxws\Media\Opener;
+use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
@@ -97,3 +101,26 @@ it('takes macros, so other packages can add their own tools', function () {
 
     expect(Media::openTwo('local')->pathCount())->toBe(2);
 });
+
+it('encodes a ladder in one ffmpeg run with an output per rendition that fits', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(width: 1280, height: 720)]);
+    Storage::fake('renditions');
+
+    $result = Media::fromDisk('renditions')->open('video.mp4')
+        ->ladder(Ladder::standard()->hardware(HardwareAcceleration::Vaapi), 'videos/1/{height}p-{bitrate}.mp4')
+        ->toDisk('renditions')
+        ->save();
+
+    expect($result->paths())->toBe(['videos/1/720p-2800.mp4', 'videos/1/480p-1400.mp4', 'videos/1/360p-800.mp4']);
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 5, 7) === ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi', '-vaapi_device', '/dev/dri/renderD128', '-i']
+        && count(array_keys($arguments, '-map', true)) === 6
+        && in_array('scale_vaapi=w=-2:h=480', $arguments, true)
+        && in_array('h264_vaapi', $arguments, true));
+});
+
+it('needs a video stream for a ladder', function () {
+    Media::fake(['song.m4a' => FakeProbe::audio()]);
+
+    Media::fromDisk('local')->open('song.m4a')->ladder(Ladder::standard());
+})->throws(InvalidMediaException::class, 'song.m4a has no video stream.');
