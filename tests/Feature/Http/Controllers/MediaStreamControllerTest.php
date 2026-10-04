@@ -166,6 +166,17 @@ it('serves thumbnails as an image track in hls and dash', function () {
     $this->get('videos/1/thumbnails/1.webp')->assertNotFound();
 });
 
+it('serves the chapters as webvtt', function () {
+    Media::fake(['video-1.mp4' => [...FakeProbe::video(duration: 13), 'chapters' => [['start_time' => '0', 'end_time' => '6', 'tags' => ['title' => 'Opening']]]]]);
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()->withChapters());
+
+    $this->get('videos/1/chapters.vtt')->assertOk()->assertHeader('Content-Type', 'text/vtt; charset=utf-8')->assertSee("00:00:00.000 --> 00:00:06.000\nOpening", escape: false);
+
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"));
+
+    $this->get('videos/1/chapters.vtt')->assertNotFound();
+});
+
 it('queues the first segments of a track and the next ones after each fragment', function () {
     Bus::fake();
     config([

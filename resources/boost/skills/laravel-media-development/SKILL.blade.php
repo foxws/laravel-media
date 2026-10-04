@@ -100,10 +100,11 @@ Route::middleware('auth')->group(fn () => Route::mediaStream('videos/{video}', '
 MediaStream::url('videos', ['video' => $video]);       // CMAF: HLS with fragmented MP4, the segments DASH uses too
 MediaStream::dashUrl('videos', ['video' => $video]);   // DASH
 MediaStream::hlsUrl('videos', ['video' => $video]);    // HLS with MPEG-TS, e.g. for rotating keys or old devices
+MediaStream::chaptersUrl('videos', ['video' => $video]);   // the chapters as WebVTT, for the player's seek bar
 @endboostsnippet
 
 - **Resolvers:** parameters typed as a model (any `UrlRoutable`) are bound like implicit route model binding (404 when missing); other parameters are injected by the container. Return an `Opener` or a configured `DirectStream`. Authorize inside the resolver or with route middleware.
-- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.license`, `.track-playlist`, `.init` and `.fragment`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
+- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.license`, `.track-playlist`, `.init`, `.fragment` and `.chapters`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
 - **Signed streams:** `signed($lifetime)` rejects requests without a valid signature (403) and signs every playlist, segment and key URL for `$lifetime` seconds (default `media.delivery.url_lifetime`).
 
 For full control, call the stream yourself from your own routes:
@@ -200,6 +201,7 @@ $video->update(['scenes' => array_map(fn (Scene $scene) => $scene->toArray(), $m
 - **DASH:** one `<EventStream schemeIdUri="urn:foxws:media:marker" value="{class}" timescale="1000">` per class at the start of the Period, with `<Event id presentationTime duration>` in milliseconds and the title as its text.
 - **Players:** Shaka Player fires `timelineregionadded` for DASH events, and for HLS date ranges since 5.2 (older versions fire `metadata` with type `com.apple.quicktime.HLS`). Read `event.detail.schemeIdUri`/`value` (DASH) or the `CLASS` (HLS) to tell the kinds apart.
 - `markers()` returns them all, chapters included, sorted by start. `Marker` refuses a negative start, an end before its start and an empty class.
+- **Chapter track:** `chapters.vtt` (`MediaStream::chaptersUrl()`) serves the markers of class `chapter` as WebVTT cues with ids `{class}-{n}`, for seek bars, e.g. Shaka Player's `player.addChaptersTrack($url, 'en')` after `load()`. Each cue ends where the next one starts, and one without an end runs to the end of the stream; it's a 404 without chapters. `->chapterTrackFrom(['chapter', 'intro'], 'Main')` lists other classes (`null` for every marker) and fills the gaps between them and after the last one with a cue titled `Main`, so players don't show the last chapter's title until the end. `chapterTrack()->toWebVtt()` returns it without a route.
 
 ### Encrypting direct streams
 

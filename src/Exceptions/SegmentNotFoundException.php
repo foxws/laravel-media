@@ -31,6 +31,11 @@ class SegmentNotFoundException extends NotFoundHttpException
         return new self('This stream has no thumbnails.');
     }
 
+    public static function noChapters(): self
+    {
+        return new self('This stream has no chapters.');
+    }
+
     public static function forTrack(int $variant, string $track): self
     {
         return new self("Variant {$variant} has no {$track} track.");

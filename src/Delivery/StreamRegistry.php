@@ -77,6 +77,18 @@ class StreamRegistry
     }
 
     /**
+     * The URL of a stream's chapters as WebVTT, signed when the stream is.
+     *
+     * @param  array<string, mixed>  $parameters
+     *
+     * @throws InvalidArgumentException
+     */
+    public function chaptersUrl(string $name, array $parameters = []): string
+    {
+        return $this->routeUrl($name, 'chapters', $parameters);
+    }
+
+    /**
      * @param  array<string, mixed>  $parameters
      *
      * @throws InvalidArgumentException

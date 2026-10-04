@@ -45,5 +45,6 @@ it('builds the urls of the mpeg-ts playlist and the dash manifest', function () 
     Route::mediaStream('videos/{video}', 'videos');
 
     expect(MediaStream::hlsUrl('videos', ['video' => 1]))->toBe('http://localhost/videos/1/hls.m3u8')
-        ->and(MediaStream::dashUrl('videos', ['video' => 1]))->toBe('http://localhost/videos/1/dash.mpd');
+        ->and(MediaStream::dashUrl('videos', ['video' => 1]))->toBe('http://localhost/videos/1/dash.mpd')
+        ->and(MediaStream::chaptersUrl('videos', ['video' => 1]))->toBe('http://localhost/videos/1/chapters.vtt');
 });

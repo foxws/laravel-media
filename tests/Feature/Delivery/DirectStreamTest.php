@@ -763,6 +763,37 @@ it('adds the markers to the dash manifest as an event stream per class', functio
     ]));
 });
 
+it('serves the chapters as a webvtt track', function () {
+    Media::fake(['video.mp4' => videoWithChapters()]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withChapters()
+        ->withMarkers([new Marker(8.5, 10, 'Twist', 'highlight')]);
+
+    $response = $stream->chapterTrackResponse();
+
+    expect($response->headers->get('Content-Type'))->toBe('text/vtt; charset=utf-8')
+        ->and($response->getContent())->toContain("chapter-0\n00:00:00.000 --> 00:00:06.000\nOpening")
+        ->toContain("chapter-1\n00:00:06.000 --> 00:00:13.000\nThe \"end\"")
+        ->not->toContain('Twist');
+});
+
+it('lists the markers of other classes in the chapter track, with a title for the gaps', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $track = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->withMarkers([new Marker(2, 4, 'Intro', 'intro'), new Marker(8, 9, 'Twist', 'highlight')])
+        ->chapterTrackFrom(['intro'], 'Main')
+        ->chapterTrack();
+
+    expect($track->markers)->toHaveCount(1)->and($track->duration)->toBe(13.0)->and($track->gapTitle)->toBe('Main')
+        ->and(Media::fromDisk('videos')->open('video.mp4')->stream()->withMarkers([new Marker(8, 9)])->chapterTrackFrom(null)->chapterTrack()->markers)->toHaveCount(1);
+});
+
+it('has no chapter track without chapters', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    Media::fromDisk('videos')->open('video.mp4')->stream()->withChapters()->chapterTrackResponse();
+})->throws(SegmentNotFoundException::class, 'This stream has no chapters.');
+
 it('probes each file once across requests', function () {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
     Storage::disk('videos')->put('video.mp4', 'video');
