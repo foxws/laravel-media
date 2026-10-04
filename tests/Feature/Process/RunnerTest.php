@@ -88,3 +88,14 @@ it('streams standard output to the output callback', function () {
 
     expect($output)->toContain('first')->toContain('second')->not->toContain('warning');
 });
+
+it('dispatches to an event fake set up after the runner was resolved', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Process::fake();
+    $runner = Runner::make();
+    Event::fake([ProcessCompleted::class]);
+
+    $runner->run(Executable::FFMpeg, ['-version']);
+
+    Event::assertDispatched(ProcessCompleted::class);
+});
