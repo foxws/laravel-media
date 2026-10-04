@@ -62,6 +62,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | FFmpeg Log Level
+    |--------------------------------------------------------------------------
+    |
+    | What ffmpeg writes to its error output. Successful runs that still wrote
+    | something are logged as warnings on the log channel. Set this to
+    | "warning" to see why output from damaged files looks wrong.
+    |
+    */
+
+    'ffmpeg_log_level' => env('MEDIA_FFMPEG_LOG_LEVEL', 'error'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Remote Inputs
     |--------------------------------------------------------------------------
     |

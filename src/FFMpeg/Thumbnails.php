@@ -50,6 +50,8 @@ class Thumbnails
 
     protected ?string $visibility = null;
 
+    protected ?int $timeout = null;
+
     protected ?Closure $urlResolver = null;
 
     protected ?Tonemap $toneMap;
@@ -154,6 +156,16 @@ class Thumbnails
     }
 
     /**
+     * The maximum seconds ffmpeg may run, instead of the configured media.timeout.
+     */
+    public function timeout(int $seconds): static
+    {
+        $this->timeout = $seconds;
+
+        return $this;
+    }
+
+    /**
      * Resolve the image URL written in each cue, from a sprite sheet's path on the target disk.
      * By default cues use the sheet's file name, relative to the WebVTT file.
      *
@@ -210,6 +222,7 @@ class Thumbnails
             ->inFormat($this->sheetFormat($sheets))
             ->toDisk($this->disk())
             ->when($this->visibility !== null, fn (Builder $builder) => $builder->withVisibility((string) $this->visibility))
+            ->when($this->timeout !== null, fn (Builder $builder) => $builder->timeout((int) $this->timeout))
             ->when($this->reportsProgress(), fn (Builder $builder) => $builder->onProgress($this->reportProgress(...)))
             ->save("{$name}_%03d.{$this->extension}");
 

@@ -2,14 +2,21 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Exceptions\FailureReason;
 use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Executables\Executable;
+use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
 use Foxws\Media\Process\Runner;
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
+use Illuminate\Process\FakeProcessResult;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
+use Psr\Log\AbstractLogger;
+use Symfony\Component\Process\Exception\ProcessTimedOutException as SymfonyProcessTimedOutException;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 it('runs the resolved executable and returns its output', function () {
     $path = fakeExecutable(Executable::FFProbe);
@@ -28,7 +35,7 @@ it('throws with the error output when the process fails', function () {
     Process::fake(['*' => Process::result(errorOutput: 'Invalid data found when processing input', exitCode: 1)]);
 
     Runner::make()->run(Executable::FFMpeg, ['-i', 'broken.mp4']);
-})->throws(ProcessFailedException::class, 'ffmpeg exited with code 1: Invalid data found when processing input');
+})->throws(ProcessFailedException::class, 'ffmpeg exited with code 1 (invalid_input): Invalid data found when processing input');
 
 it('dispatches started and completed events', function () {
     fakeExecutable(Executable::FFMpeg);
@@ -98,4 +105,54 @@ it('dispatches to an event fake set up after the runner was resolved', function 
     $runner->run(Executable::FFMpeg, ['-version']);
 
     Event::assertDispatched(ProcessCompleted::class);
+});
+
+it('turns a timeout into a retryable failure and passes the reason to the failed event', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Event::fake([ProcessFailed::class]);
+    $runner = new class(app(Executables::class)) extends Runner
+    {
+        protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
+        {
+            throw new ProcessTimedOutException(
+                new SymfonyProcessTimedOutException(new SymfonyProcess($command, timeout: $timeout), SymfonyProcessTimedOutException::TYPE_GENERAL),
+                new FakeProcessResult(output: 'partial'),
+            );
+        }
+    };
+
+    expect(fn () => $runner->run(Executable::FFMpeg, ['-i', 'video.mp4'], timeout: 30))
+        ->toThrow(fn (ProcessFailedException $exception) => expect($exception)
+            ->reason->toBe(FailureReason::Timeout)
+            ->result->exitCode->toBe(124)
+            ->getMessage()->toBe('ffmpeg was stopped after the timeout of 30 seconds.'));
+
+    Event::assertDispatched(ProcessFailed::class, fn (ProcessFailed $event) => $event->reason === FailureReason::Timeout);
+});
+
+it('logs failures with their report context and warnings of successful runs', function () {
+    fakeExecutable(Executable::FFMpeg);
+    $logger = new class extends AbstractLogger
+    {
+        /** @var list<array{level: mixed, message: string, context: array<string, mixed>}> */
+        public array $records = [];
+
+        public function log($level, Stringable|string $message, array $context = []): void
+        {
+            $this->records[] = ['level' => $level, 'message' => (string) $message, 'context' => $context];
+        }
+    };
+    $runner = new Runner(app(Executables::class), $logger);
+    Process::fake(['*' => Process::sequence()
+        ->push(Process::result(errorOutput: 'Past duration 0.99 too large'))
+        ->push(Process::result(errorOutput: 'No space left on device', exitCode: 1))]);
+
+    $runner->run(Executable::FFMpeg, ['-i', 'video.mp4']);
+    rescue(fn () => $runner->run(Executable::FFMpeg, ['-i', 'video.mp4']), report: false);
+
+    $records = collect($logger->records)->whereIn('level', ['warning', 'error'])->values();
+
+    expect($records[0])->level->toBe('warning')->context->toMatchArray(['warnings' => 'Past duration 0.99 too large'])
+        ->and($records[1]['level'])->toBe('error')
+        ->and($records[1]['context'])->toMatchArray(['reason' => 'no_space', 'retryable' => true, 'error_output' => 'No space left on device']);
 });
