@@ -64,7 +64,7 @@ it('only lists what it would delete in a dry run', function () {
     $stale = temporaryDirectoryAged("{$this->root}/0123456789abcdef", minutes: 300);
 
     $this->artisan('media:clean', ['--dry-run' => true])
-        ->expectsOutputToContain("Would delete {$stale}")
+        ->expectsOutputToContain('Would delete '.str_replace('\\', '/', $stale))
         ->expectsOutputToContain('Found 1 temporary directory older than 120 minutes.')
         ->assertSuccessful();
 
