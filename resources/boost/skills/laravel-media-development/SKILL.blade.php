@@ -224,7 +224,7 @@ $video->update([
 Options only Shaka Packager has (DRM key servers, live and low-latency DASH, base URLs, segment numbering) are typed and validated in `Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions`, so the generic builder stays driver-neutral:
 
 @boostsnippet("Shaka options", "php")
-use Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions;
+use Foxws\Media\Packaging\Drivers\Shaka\{ProtectionSystem, ShakaOptions};
 
 $media->package()->addStreamsFrom()->withDashManifest()
     ->withOptions(ShakaOptions::make()
@@ -233,7 +233,7 @@ $media->package()->addStreamsFrom()->withDashManifest()
         ->timeShiftBufferDepth(60)
         ->widevine('https://license.test/cenc/getcontentkey', contentId: 'abcd1234')
         ->aesSigning('widevine_test', $signingKey, $signingIv)
-        ->protectionSystems(['Widevine', 'PlayReady']))
+        ->protectionSystems(ProtectionSystem::Widevine, ProtectionSystem::PlayReady))
     ->save('videos/1');
 @endboostsnippet
 
@@ -241,7 +241,7 @@ $media->package()->addStreamsFrom()->withDashManifest()
 - **Live DASH:** `minBufferTime()`, `minimumUpdatePeriod()`, `suggestedPresentationDelay()`, `timeShiftBufferDepth()`, `preservedSegmentsOutsideLiveWindow()`, `utcTimings([...])`, `lowLatencyDashMode()`, `generateStaticLiveMpd()`.
 - **Segments:** `startSegmentNumber()`, `transportStreamTimestampOffset()`, `forceClIndex()`.
 - **Encryption:**
-  - `cryptByteBlock()`, `skipByteBlock()`, `vp9SubsampleEncryption()`, `protectionSystems()`, `pssh()`, `iv()`, `playreadyExtraHeaderData()`
+  - `cryptByteBlock()`, `skipByteBlock()`, `vp9SubsampleEncryption()`, `protectionSystems(ProtectionSystem::...)`, `pssh()`, `iv()`, `playreadyExtraHeaderData()`
   - `widevine()`, `playready()`, `maxPixels()`, `groupId()`, `enableEntitlementLicense()`
   - `aesSigning()` or `rsaSigning()` (one at a time), `keyServerTls()`, `decrypt()`
 - Signing keys, IVs, PSSH and certificate passwords are redacted from commands and logs. `withOptions([...])` also takes a plain array, and `withOption()` takes a single raw option.

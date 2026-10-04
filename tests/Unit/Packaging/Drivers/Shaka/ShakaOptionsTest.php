@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Packaging\Drivers\Shaka\ProtectionSystem;
 use Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions;
 
 it('maps each option to its shaka packager name and value', function (Closure $configure, array $options) {
@@ -20,7 +21,7 @@ it('maps each option to its shaka packager name and value', function (Closure $c
     'utc timings' => [fn (ShakaOptions $o) => $o->utcTimings(['urn:mpeg:dash:utc:http-xsdate:2014' => 'https://time.test/?iso']), ['utc_timings' => 'urn:mpeg:dash:utc:http-xsdate:2014=https://time.test/?iso']],
     'patterns' => [fn (ShakaOptions $o) => $o->cryptByteBlock(1)->skipByteBlock(9), ['crypt_byte_block' => '1', 'skip_byte_block' => '9']],
     'vp9 subsamples off' => [fn (ShakaOptions $o) => $o->vp9SubsampleEncryption()->vp9SubsampleEncryption(false), ['novp9_subsample_encryption' => true]],
-    'protection systems' => [fn (ShakaOptions $o) => $o->protectionSystems(['Widevine', 'PlayReady'])->pssh('abcd')->iv('00112233445566778899aabbccddeeff'), [
+    'protection systems' => [fn (ShakaOptions $o) => $o->protectionSystems(ProtectionSystem::Widevine, ProtectionSystem::PlayReady, ProtectionSystem::Widevine)->pssh('abcd')->iv('00112233445566778899aabbccddeeff'), [
         'protection_systems' => 'Widevine,PlayReady', 'pssh' => 'abcd', 'iv' => '00112233445566778899aabbccddeeff',
     ]],
     'widevine' => [fn (ShakaOptions $o) => $o->widevine('https://license.test/', 'abcd', 'policy')->maxPixels(sd: 442368, hd: 2073600)->groupId('ab')->enableEntitlementLicense(), [
@@ -47,7 +48,7 @@ it('rejects invalid values', function (Closure $configure, string $message) {
     'empty base url' => [fn (ShakaOptions $o) => $o->baseUrls(['']), 'base URLs must not be empty'],
     'negative buffer' => [fn (ShakaOptions $o) => $o->timeShiftBufferDepth(-1), "can't be negative"],
     'negative segment number' => [fn (ShakaOptions $o) => $o->startSegmentNumber(-1), 'at least 0'],
-    'unknown protection system' => [fn (ShakaOptions $o) => $o->protectionSystems(['Clearkey']), 'some of Widevine, PlayReady'],
+    'no protection system' => [fn (ShakaOptions $o) => $o->protectionSystems(), 'at least one protection system'],
     'non-hex content id' => [fn (ShakaOptions $o) => $o->widevine('https://license.test/', 'xyz'), 'content ID must be hexadecimal'],
     'zero pixels' => [fn (ShakaOptions $o) => $o->maxPixels(sd: 0), 'at least 1'],
     'empty utc timings' => [fn (ShakaOptions $o) => $o->utcTimings([]), 'must not be empty'],

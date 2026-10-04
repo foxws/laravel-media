@@ -19,11 +19,6 @@ use InvalidArgumentException;
  */
 final class ShakaOptions implements Arrayable
 {
-    /**
-     * The protection systems Shaka Packager can signal.
-     */
-    public const array PROTECTION_SYSTEMS = ['Widevine', 'PlayReady', 'FairPlay', 'Marlin', 'CommonSystem'];
-
     /** @var array<string, string|bool> */
     protected array $options = [];
 
@@ -178,19 +173,18 @@ final class ShakaOptions implements Arrayable
     }
 
     /**
-     * Signal these protection systems in the manifests, e.g. ['Widevine', 'PlayReady'].
-     *
-     * @param  list<string>  $systems
+     * Signal these protection systems in the manifests, e.g. protectionSystems(ProtectionSystem::Widevine, ProtectionSystem::PlayReady).
      */
-    public function protectionSystems(array $systems): self
+    public function protectionSystems(ProtectionSystem ...$systems): self
     {
-        $unknown = array_diff($systems, self::PROTECTION_SYSTEMS);
-
-        if ($systems === [] || $unknown !== []) {
-            throw new InvalidArgumentException('The protection systems must be some of '.implode(', ', self::PROTECTION_SYSTEMS).'.');
+        if ($systems === []) {
+            throw new InvalidArgumentException('Pass at least one protection system.');
         }
 
-        return $this->set('protection_systems', implode(',', $systems));
+        return $this->set('protection_systems', implode(',', array_map(
+            fn (ProtectionSystem $system): string => $system->value,
+            array_values(array_unique($systems, SORT_REGULAR)),
+        )));
     }
 
     public function playreadyExtraHeaderData(string $xml): self
