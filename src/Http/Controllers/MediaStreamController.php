@@ -65,11 +65,16 @@ class MediaStreamController
     public function playlist(Request $request): Response
     {
         [$definition, $stream] = $this->resolve($request);
+        $variant = $this->number($request, 'variant');
 
-        return $this->playlistResponse($stream->fragmented(false)->mediaPlaylist(
-            $this->number($request, 'variant'),
+        $response = $this->playlistResponse($stream->fragmented(false)->mediaPlaylist(
+            $variant,
             fn (Segment $segment, int $variant): string => $this->url($request, $definition, 'segment', ['variant' => $variant, 'segment' => $segment->index]),
         ));
+
+        $stream->packageAhead($variant, 0);
+
+        return $response;
     }
 
     /**
@@ -79,20 +84,25 @@ class MediaStreamController
     {
         [$definition, $stream] = $this->resolve($request);
         $track = $this->track($request);
+        $variant = $this->number($request, 'variant');
 
-        return $this->playlistResponse($stream->mediaPlaylist(
-            $this->number($request, 'variant'),
+        $response = $this->playlistResponse($stream->mediaPlaylist(
+            $variant,
             fn (Segment $segment, int $variant): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->value, 'segment' => $segment->index]),
             $track,
             fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->value]),
         ));
+
+        $stream->packageAhead($variant, 0, $track);
+
+        return $response;
     }
 
     public function dash(Request $request): Response
     {
         [$definition, $stream] = $this->resolve($request);
 
-        return new Response($stream->dashManifest(
+        $response = new Response($stream->dashManifest(
             fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->value]),
             fn (Segment $segment, int $variant, Track $track): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->value, 'segment' => $segment->index]),
             fn (int $subtitle): string => $this->url($request, $definition, 'subtitle', ['subtitle' => $subtitle]),
@@ -101,6 +111,10 @@ class MediaStreamController
             'Content-Type' => 'application/dash+xml',
             'Cache-Control' => 'private, no-cache',
         ]);
+
+        $stream->packageStart();
+
+        return $response;
     }
 
     /**

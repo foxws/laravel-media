@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Delivery\PackageSegments;
+use Foxws\Media\Delivery\Track;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Facades\MediaStream;
 use Foxws\Media\FFMpeg\ThumbnailsResult;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Testing\FakeProbe;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -141,4 +144,24 @@ it('serves thumbnails as an image track in hls and dash', function () {
     $this->get('videos/1/dash.mpd')->assertSee('<SegmentURL media="http://localhost/videos/1/thumbnails/0.webp"/>', escape: false);
     $this->get('videos/1/thumbnails/0.webp')->assertOk()->assertHeader('Content-Type', 'image/webp');
     $this->get('videos/1/thumbnails/1.webp')->assertNotFound();
+});
+
+it('queues the first segments of a track and the next ones after each fragment', function () {
+    Bus::fake();
+    config([
+        'filesystems.disks.videos' => ['driver' => 'local', 'root' => sys_get_temp_dir()],
+        'filesystems.disks.segments' => ['driver' => 'local', 'root' => sys_get_temp_dir()],
+        'queue.default' => 'database',
+        'media.delivery.look_ahead' => 2,
+        'media.delivery.look_ahead_via' => 'queue',
+    ]);
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"));
+
+    $this->get('videos/1/0/video/index.m3u8')->assertOk();
+    $this->get('videos/1/0/video/1.m4s')->assertOk();
+    $this->get('videos/1/dash.mpd')->assertOk();
+
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [0, 1] && $job->track === Track::Video);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [2] && $job->track === Track::Video);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->track === Track::Audio);
 });
