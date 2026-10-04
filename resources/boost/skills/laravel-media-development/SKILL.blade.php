@@ -249,15 +249,36 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `executables.ffmpeg`, `.ffprobe`, `.packager`, `.ab-av1` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |
+| `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |
 | `remote_inputs.enabled`, `.url_lifetime` | Read remote disks through signed URLs |
 | `temporary_files.root`, `.cache_root` | Where downloads and outputs are written; the cache root is for small files (e.g. `/dev/shm`) |
 | `temporary_files.min_free`, `.size_multiplier`, `.cache_min_free` | Fail fast with `InsufficientStorageException` when a root is too full |
 | `uploads.concurrency`, `.multipart_threshold`, `.multipart_part_size`, `.multipart_concurrency` | S3 upload tuning |
 
-## Events and exceptions
+## Errors, retries and logging
 
-- **Events:** `Process\Events\ProcessStarted`, `ProcessCompleted` and `ProcessFailed` are dispatched for every ffmpeg/ffprobe run, with the command redacted.
-- **Exceptions:** all live in `Foxws\Media\Exceptions`. `ProcessFailedException` carries the `Result` with the exit code and error output.
+Failed runs throw `Foxws\Media\Exceptions\ProcessFailedException`:
+- `$exception->reason` is a `FailureReason` recognised from ffmpeg's error output: `InvalidInput`, `MissingInput`, `UnsupportedCodec`, `InvalidOptions`, `PermissionDenied`, `NoSpace`, `Network`, `Timeout` or `Unknown`.
+- `$exception->isRetryable()` is true for `Network`, `Timeout`, `NoSpace` and `Unknown`. Broken uploads, missing codecs or wrong options fail the same way every time.
+- When the exception is reported, its `context()` (executable, exit code, reason, redacted command, last 20 lines of error output) appears in the logs and in error trackers such as Sentry, Flare or Nightwatch.
+
+@boostsnippet("Retrying only what can recover", "php")
+use Foxws\Media\Exceptions\ProcessFailedException;
+
+public function handle(): void
+{
+    try {
+        Media::fromDisk('s3')->open($this->path)->ffmpeg()->timeout(1800)->inFormat(Format::h264())->save($this->output);
+    } catch (ProcessFailedException $exception) {
+        $exception->isRetryable() ? $this->release(60) : $this->fail($exception);
+    }
+}
+@endboostsnippet
+
+- `->timeout($seconds)` on the builder or `thumbnails()` overrides `media.timeout`. Keep it below the job's `$timeout`, so the package stops ffmpeg and throws a `Timeout` failure instead of the worker being killed.
+- Failures are logged as errors with the same context. Successful runs that still wrote to the error output are logged as warnings. Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to see why output from damaged files looks wrong.
+- **Events:** `Process\Events\ProcessStarted`, `ProcessCompleted` and `ProcessFailed` (with `$result` and `$reason`) are dispatched for every ffmpeg/ffprobe run, with the command redacted.
+- **Other exceptions** live in `Foxws\Media\Exceptions` too: `ExecutableNotFoundException`, `InvalidMediaException`, `InvalidFormatException`, `InvalidFilterException`, `ExportFailedException`, `InsufficientStorageException` and `TemporaryFileException`.
 
 ## Testing
 

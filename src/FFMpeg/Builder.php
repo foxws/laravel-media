@@ -28,6 +28,7 @@ use Foxws\Media\Filters\Tonemap;
 use Foxws\Media\Opener;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Traits\Conditionable;
 use Throwable;
 
@@ -77,6 +78,8 @@ class Builder
     protected ?Disk $targetDisk = null;
 
     protected ?string $visibility = null;
+
+    protected ?int $timeout = null;
 
     public function __construct(
         protected Opener $opener,
@@ -259,6 +262,17 @@ class Builder
     }
 
     /**
+     * The maximum seconds ffmpeg may run, instead of the configured media.timeout.
+     * Keep it at or below the queue job's $timeout, so the job can handle the failure.
+     */
+    public function timeout(int $seconds): static
+    {
+        $this->timeout = $seconds;
+
+        return $this;
+    }
+
+    /**
      * The disk the output is saved to.
      */
     public function disk(): Disk
@@ -299,7 +313,7 @@ class Builder
             '-y',
             '-hide_banner',
             '-nostdin',
-            '-loglevel', 'error',
+            '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
             ...$inputs,
             ...($this->watermark !== null ? ['-i', $this->watermark->inputPath()] : []),
             ...($output !== null ? [
@@ -546,7 +560,7 @@ class Builder
     protected function run(array $arguments, int $pass = 1, int $passes = 1): void
     {
         if (! $this->reportsProgress()) {
-            $this->runner->run(Executable::FFMpeg, $arguments);
+            $this->runner->run(Executable::FFMpeg, $arguments, $this->timeout);
 
             return;
         }
@@ -556,6 +570,7 @@ class Builder
         $this->runner->run(
             Executable::FFMpeg,
             ['-progress', 'pipe:1', '-nostats', ...$arguments],
+            timeout: $this->timeout,
             onOutput: function (string $output) use ($parser, $pass, $passes): void {
                 foreach ($parser->feed($output) as $progress) {
                     $this->reportProgress($progress->forPass($pass, $passes));

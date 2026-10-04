@@ -11,6 +11,7 @@ use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Psr\Log\LoggerInterface;
@@ -53,7 +54,16 @@ class Runner
 
         $startedAt = hrtime(true);
 
-        [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout ?? $this->timeout, $onOutput);
+        $timeout ??= $this->timeout;
+
+        try {
+            [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $onOutput);
+        } catch (ProcessTimedOutException $exception) {
+            $this->fail(ProcessFailedException::timedOut(
+                new Result($executable, $redacted, 124, $exception->result->output(), $exception->result->errorOutput(), (hrtime(true) - $startedAt) / 1e9),
+                $timeout,
+            ));
+        }
 
         $result = new Result(
             executable: $executable,
@@ -65,20 +75,33 @@ class Runner
         );
 
         if ($result->failed()) {
-            Event::dispatch(new ProcessFailed($result));
+            $this->fail(ProcessFailedException::for($result));
+        }
 
-            $this->logger?->error("{$executable->value} failed", [
+        if (trim($result->errorOutput) !== '') {
+            $this->logger?->warning("{$executable->value} reported warnings", [
                 'command' => $redacted,
-                'exit_code' => $result->exitCode,
-                'error' => $result->errorOutput,
+                'warnings' => trim($result->errorOutput),
             ]);
-
-            throw ProcessFailedException::for($result);
         }
 
         Event::dispatch(new ProcessCompleted($result));
 
         return $result;
+    }
+
+    /**
+     * Dispatch the failure, log it with its report context and throw it.
+     *
+     * @throws ProcessFailedException
+     */
+    protected function fail(ProcessFailedException $exception): never
+    {
+        Event::dispatch(new ProcessFailed($exception->result, $exception->reason));
+
+        $this->logger?->error($exception->getMessage(), $exception->context());
+
+        throw $exception;
     }
 
     /**

@@ -492,3 +492,24 @@ it('tone maps inside the watermark graph', function () {
     expect($arguments[array_search('-filter_complex', $arguments, true) + 1])
         ->toStartWith('[0:v]'.new Tonemap(ToneMapAlgorithm::Mobius).'[base];');
 });
+
+it('runs ffmpeg with its own timeout instead of the configured one', function () {
+    fakeExecutable(Executable::FFMpeg);
+    config(['media.timeout' => 14400]);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->timeout(120)->save('out.mp4');
+
+    Process::assertRan(fn ($process) => $process->timeout === 120);
+});
+
+it('uses the configured ffmpeg log level', function () {
+    fakeExecutable(Executable::FFMpeg);
+    config(['media.ffmpeg_log_level' => 'warning']);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->arguments('out.mp4');
+
+    expect(array_slice($arguments, 3, 2))->toBe(['-loglevel', 'warning']);
+});

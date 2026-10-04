@@ -9,6 +9,7 @@ use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filters\Number;
 use Foxws\Media\Process\Runner;
+use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
 
 /**
@@ -33,7 +34,7 @@ class SceneDetector
         $result = $this->runner->run(Executable::FFMpeg, [
             '-hide_banner',
             '-nostdin',
-            '-loglevel', 'error',
+            '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
             '-i', $media->inputPath(),
             '-map', '0:v:0',
             '-vf', "scale=320:-2,select='gt(scene,".Number::format($threshold).")',metadata=print:file=-",
