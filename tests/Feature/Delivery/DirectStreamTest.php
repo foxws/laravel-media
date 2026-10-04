@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Delivery\Segment;
+use Foxws\Media\Delivery\Track;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
@@ -208,4 +209,170 @@ it('adds no keys to unencrypted streams', function () {
 
     expect($stream->isEncrypted())->toBeFalse()
         ->and($stream->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts"))->not->toContain('#EXT-X-KEY');
+});
+
+it('lists video tracks with a shared audio rendition when fragmented', function () {
+    Media::fake([
+        '1080.mp4' => FakeProbe::video(width: 1920, height: 1080),
+        '720.mp4' => FakeProbe::video(width: 1280, height: 720),
+    ]);
+
+    $playlist = Media::fromDisk('videos')->open(['1080.mp4', '720.mp4'])->stream()->fragmented()
+        ->masterPlaylist(fn (int $variant, ?Track $track) => "{$variant}/{$track?->value}.m3u8");
+
+    expect($playlist)->toBe(implode("\n", [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-INDEPENDENT-SEGMENTS',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="0/audio.m3u8"',
+        '#EXT-X-STREAM-INF:BANDWIDTH=4950000,RESOLUTION=1920x1080,FRAME-RATE=30.000,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"',
+        '0/video.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=4950000,RESOLUTION=1280x720,FRAME-RATE=30.000,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"',
+        '1/video.m3u8',
+        '',
+    ]));
+});
+
+it('lists the audio track as the variant of fragmented audio', function () {
+    Media::fake(['song.m4a' => FakeProbe::audio()]);
+
+    $playlist = Media::fromDisk('videos')->open('song.m4a')->stream()->fragmented()
+        ->masterPlaylist(fn (int $variant, ?Track $track) => "{$variant}/{$track?->value}.m3u8");
+
+    expect($playlist)->toContain("CODECS=\"mp4a.40.2\"\n0/audio.m3u8")
+        ->not->toContain('#EXT-X-MEDIA');
+});
+
+it('maps the initialization segment in the media playlist of a track', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $playlist = Media::fromDisk('videos')->open('video.mp4')->stream()->fragmented()->mediaPlaylist(
+        0,
+        fn (Segment $segment, int $variant, ?Track $track) => "{$variant}/{$track?->value}/{$segment->index}.m4s",
+        Track::Audio,
+        fn (int $variant, Track $track) => "{$variant}/{$track->value}/init.mp4",
+    );
+
+    expect($playlist)->toStartWith("#EXTM3U\n#EXT-X-VERSION:7\n")
+        ->toContain("#EXT-X-MAP:URI=\"0/audio/init.mp4\"\n#EXTINF:6.000000,\n0/audio/0.m4s")
+        ->toContain('0/audio/2.m4s');
+});
+
+it('needs the url of the initialization segment and an existing track', function () {
+    Media::fake(['song.m4a' => FakeProbe::audio()]);
+    $stream = Media::fromDisk('videos')->open('song.m4a')->stream()->fragmented();
+
+    expect(fn () => $stream->mediaPlaylist(0, fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'initialization segment')
+        ->and(fn () => $stream->mediaPlaylist(0, fn () => 'segment', Track::Video, fn () => 'init'))->toThrow(SegmentNotFoundException::class, 'Variant 0 has no video track.');
+});
+
+it('copies one track of a segment into fragmented mp4 and caches its initialization segment', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+
+    $path = $stream->segment(0, 1, Track::Video);
+
+    expect($path)->toMatch('#^media-segments/[0-9a-f]{32}/6/video/1\.m4s$#')
+        ->and($stream->initSegment(0, Track::Video))->toBe(dirname($path).'/init.mp4');
+    expect(Storage::disk('segments')->get($path))->toStartWith(pack('N', 8).'moof')
+        ->and(Storage::disk('segments')->get(dirname($path).'/init.mp4'))->toStartWith(pack('N', 12).'ftyp');
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 12, -1) === [
+        '-map', '0:v:0', '-c', 'copy',
+        '-output_ts_offset', '10', '-avoid_negative_ts', 'disabled', '-use_editlist', '0',
+        '-movflags', '+frag_keyframe+empty_moov+default_base_moof+frag_discont', '-fflags', '+bitexact', '-f', 'mp4',
+    ]);
+});
+
+it('packages the first segment for an initialization segment that is not cached yet', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(codec: 'hevc', duration: 13)]);
+
+    $response = Media::fromDisk('videos')->open('video.mp4')->stream()->initSegmentResponse(0, Track::Video);
+
+    expect($response->headers->get('Content-Type'))->toBe('video/mp4');
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('hvc1', $arguments, true) && $arguments[array_search('-ss', $arguments, true) + 1] === '0');
+});
+
+it('serves fragments with the content type of their track', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $response = Media::fromDisk('videos')->open('video.mp4')->stream()->segmentResponse(0, 2, Track::Audio);
+
+    expect($response->headers->get('Content-Type'))->toBe('audio/mp4');
+});
+
+it('refuses codecs fragmented mp4 cannot carry', function () {
+    Media::fake(['video.ogv' => FakeProbe::video(codec: 'theora')]);
+
+    Media::fromDisk('videos')->open('video.ogv')->stream()->segment(0, 0, Track::Video);
+})->throws(InvalidMediaException::class, "video.ogv can't be streamed with fragmented MP4 segments without re-encoding: [theora] isn't supported.");
+
+it('describes every track and segment in a dash manifest', function () {
+    Media::fake([
+        '1080.mp4' => FakeProbe::video(duration: 13, width: 1920, height: 1080),
+        '720.mp4' => FakeProbe::video(duration: 13, width: 1280, height: 720, audio: false),
+    ]);
+
+    $manifest = Media::fromDisk('videos')->open(['1080.mp4', '720.mp4'])->stream()->dashManifest(
+        fn (int $variant, Track $track) => "{$variant}/{$track->value}/init.mp4",
+        fn (Segment $segment, int $variant, Track $track) => "{$variant}/{$track->value}/{$segment->index}.m4s?a=1&b=2",
+    );
+
+    expect($manifest)->toBe(implode("\n", [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-main:2011" type="static" mediaPresentationDuration="PT13.000S" minBufferTime="PT6.000S">',
+        '  <Period id="0" start="PT0S">',
+        '    <AdaptationSet id="0" contentType="video" mimeType="video/mp4" startWithSAP="1">',
+        '      <Representation id="video-0" codecs="avc1.640028" bandwidth="4950000" width="1920" height="1080" frameRate="30/1">',
+        '        <SegmentList timescale="1000" presentationTimeOffset="10000">',
+        '          <Initialization sourceURL="0/video/init.mp4"/>',
+        '          <SegmentTimeline>',
+        '            <S t="10000" d="6000" r="1"/>',
+        '            <S t="22000" d="1000"/>',
+        '          </SegmentTimeline>',
+        '          <SegmentURL media="0/video/0.m4s?a=1&amp;b=2"/>',
+        '          <SegmentURL media="0/video/1.m4s?a=1&amp;b=2"/>',
+        '          <SegmentURL media="0/video/2.m4s?a=1&amp;b=2"/>',
+        '        </SegmentList>',
+        '      </Representation>',
+        '      <Representation id="video-1" codecs="avc1.640028" bandwidth="4950000" width="1280" height="720" frameRate="30/1">',
+        '        <SegmentList timescale="1000" presentationTimeOffset="10000">',
+        '          <Initialization sourceURL="1/video/init.mp4"/>',
+        '          <SegmentTimeline>',
+        '            <S t="10000" d="6000" r="1"/>',
+        '            <S t="22000" d="1000"/>',
+        '          </SegmentTimeline>',
+        '          <SegmentURL media="1/video/0.m4s?a=1&amp;b=2"/>',
+        '          <SegmentURL media="1/video/1.m4s?a=1&amp;b=2"/>',
+        '          <SegmentURL media="1/video/2.m4s?a=1&amp;b=2"/>',
+        '        </SegmentList>',
+        '      </Representation>',
+        '    </AdaptationSet>',
+        '    <AdaptationSet id="1" contentType="audio" mimeType="audio/mp4" startWithSAP="1">',
+        '      <Representation id="audio-0" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="48000">',
+        '        <SegmentList timescale="1000" presentationTimeOffset="10000">',
+        '          <Initialization sourceURL="0/audio/init.mp4"/>',
+        '          <SegmentTimeline>',
+        '            <S t="10000" d="6000" r="1"/>',
+        '            <S t="22000" d="1000"/>',
+        '          </SegmentTimeline>',
+        '          <SegmentURL media="0/audio/0.m4s?a=1&amp;b=2"/>',
+        '          <SegmentURL media="0/audio/1.m4s?a=1&amp;b=2"/>',
+        '          <SegmentURL media="0/audio/2.m4s?a=1&amp;b=2"/>',
+        '        </SegmentList>',
+        '      </Representation>',
+        '    </AdaptationSet>',
+        '  </Period>',
+        '</MPD>',
+        '',
+    ]));
+});
+
+it('serves encrypted streams with mpeg-ts segments only', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption(EncryptionKey::generate(), fn () => 'key');
+
+    expect(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'Encrypted direct streams use MPEG-TS segments.')
+        ->and(fn () => $stream->fragmented()->masterPlaylist(fn () => 'playlist'))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidArgumentException::class);
 });
