@@ -129,7 +129,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **Errors:** out-of-range segments and variants throw `SegmentNotFoundException` (a 404). Files with codecs MPEG-TS can't carry (VP9, AV1, Opus, ...) throw `InvalidMediaException`.
 - **Formats:** each route picks its own segment format, so one stream definition serves all three URLs. Prefer `url()` (CMAF): one set of cached fragments serves HLS and DASH, and every player plays it natively. MPEG-TS (`hlsUrl()`) is for per-request AES-128 encryption and old devices; Shaka Player needs mux.js loaded (`window.muxjs`) to play it.
 - `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
-- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments (`.ts`, `.m4s` and `init.mp4`) packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
+- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments (`.ts`, `.m4s` and `init.mp4`) and converted subtitles (`.vtt`) packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
 
 ### Fragmented MP4 and DASH
 
@@ -140,6 +140,19 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **DASH manifests** are static, with a `SegmentList` and millisecond `SegmentTimeline` per representation, so every segment URL can be signed. Fragments keep their source timestamps plus a fixed 10-second offset, which `presentationTimeOffset` removes again.
 - **Without routes:** `dashManifest($initUrl, $segmentUrl)`, `mediaPlaylist($variant, $segmentUrl, Track::Video, $initUrl)`, `initSegmentResponse($variant, $track)` and `segmentResponse($variant, $index, $track)`.
 - Per-request AES-128 only works with MPEG-TS: give players `hlsUrl()` for encrypted streams, because CMAF and DASH output of an encrypted stream throws. Use `exportAsDASH()` with encryption for protected DASH.
+
+### Subtitles
+
+@boostsnippet("WebVTT subtitles in direct streams", "php")
+MediaStream::define('videos', fn (Video $video) => Media::fromDisk('videos')->open($video->renditions())->stream()
+    ->withSubtitles('captions/1_en.vtt', language: 'en', label: 'English')   // a WebVTT file, on the media disk or ->withSubtitles(..., disk: 's3')
+    ->withEmbeddedSubtitles());                                               // plus the text subtitle streams of the first file
+@endboostsnippet
+
+- **HLS:** every track is an `#EXT-X-MEDIA:TYPE=SUBTITLES` rendition with a one-segment playlist, in both `cmaf.m3u8` and `hls.m3u8`. Each format gets its own `.vtt` URL with an `X-TIMESTAMP-MAP` header that lines up the cues with that format's segment timestamps.
+- **DASH:** every track is a `text/vtt` adaptation set with `lang`, a `Label` and the subtitle role, pointing straight at the `.vtt` file without `SegmentBase`. Shaka Player and dash.js load it as a single segment (a `SegmentBase` without an index range is what makes Shaka drop sidecar WebVTT).
+- **Embedded streams:** SubRip, MP4 text, ASS/SSA and WebVTT streams are converted with `-c:s webvtt` once and cached; bitmap subtitles (PGS, DVD) are skipped. Their label is the stream's title or language.
+- **Without routes:** `masterPlaylist($playlistUrl, $subtitleUrl)`, `dashManifest($initUrl, $segmentUrl, $subtitleUrl)`, `subtitlePlaylist($subtitle, $vttUrl)` and `subtitleResponse($subtitle, $timestampOffset)`: pass `0` for MPEG-TS, `FragmentedMp4::TIMESTAMP_OFFSET` for CMAF and `null` for DASH.
 
 ### Encrypting direct streams
 
