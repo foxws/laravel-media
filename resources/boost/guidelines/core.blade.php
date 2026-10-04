@@ -1,6 +1,6 @@
 # Laravel Media
 
-This application uses `foxws/laravel-media` to probe, process and package audio and video with ffprobe, ffmpeg and Shaka Packager on any Laravel disk.
+This application uses `foxws/laravel-media` to probe, process and package audio and video with ffprobe and ffmpeg on any Laravel disk. Shaka Packager, Shaka Streamer and ab-av1 come from the foxws/laravel-shaka, laravel-streamer and laravel-ab-av1 add-ons.
 
 - Use the `Foxws\Media\Facades\Media` facade (`Media::fromDisk($disk)->open($path)`). Don't add pbmedia/laravel-ffmpeg or php-ffmpeg, and don't shell out to ffmpeg or ffprobe directly.
 - Read stream, format and chapter details from `->probe()` instead of parsing ffprobe output yourself, and validate uploads with the `Foxws\Media\Rules\MediaFile` rule rather than trusting extensions or MIME types.
