@@ -21,6 +21,8 @@ use Foxws\Media\Packaging\PackagingBuilder;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Config;
 
 /**
  * One or more opened media files on a disk.
@@ -38,6 +40,8 @@ class Opener
 
     /** @var array<string, KeyframeIndex> */
     protected array $keyframes = [];
+
+    protected bool $rememberProbes = false;
 
     public function __construct(
         protected Disk $disk,
@@ -111,7 +115,8 @@ class Opener
     }
 
     /**
-     * Probe an opened file (the first one by default). Results are cached on this opener.
+     * Probe an opened file (the first one by default). Results are cached on this opener, and in
+     * the media.delivery.cache_store per file version after rememberProbes().
      *
      * @throws MediaNotFoundException
      */
@@ -119,7 +124,18 @@ class Opener
     {
         $media = $this->mediaFor($path);
 
-        return $this->probes[$media->path()] ??= $this->prober->probe($media);
+        return $this->probes[$media->path()] ??= $this->rememberProbes ? $this->rememberedProbe($media) : $this->prober->probe($media);
+    }
+
+    /**
+     * Keep probes in the media.delivery.cache_store per file version, like keyframe indexes, so
+     * later requests for the same files don't run ffprobe again. stream() turns this on.
+     */
+    public function rememberProbes(bool $remember = true): static
+    {
+        $this->rememberProbes = $remember;
+
+        return $this;
     }
 
     /**
@@ -164,7 +180,19 @@ class Opener
      */
     public function stream(): DirectStream
     {
-        return app(DirectStream::class, ['opener' => $this]);
+        return app(DirectStream::class, ['opener' => $this->rememberProbes()]);
+    }
+
+    protected function rememberedProbe(Media $media): Probe
+    {
+        /** @var array<string, mixed> $probe */
+        $probe = Cache::store(Config::get('media.delivery.cache_store'))->remember(
+            'media:probe:'.$media->versionKey(),
+            Config::integer('media.delivery.index_lifetime', 604800),
+            fn (): array => $this->prober->probe($media)->raw,
+        );
+
+        return Probe::fromArray($probe);
     }
 
     /**

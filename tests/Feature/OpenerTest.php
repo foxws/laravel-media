@@ -37,6 +37,35 @@ it('probes each file once per opener', function () {
     Process::assertRanTimes(fn ($process) => true, 2);
 });
 
+it('remembers probes across openers per file version after rememberProbes', function () {
+    fakeExecutable(Executable::FFProbe);
+    Storage::fake('videos');
+    Storage::disk('videos')->put('a.mp4', 'video');
+    Process::fake(['*' => Process::result(output: file_get_contents(fixture('ffprobe.json')))]);
+
+    Media::fromDisk('videos')->open('a.mp4')->rememberProbes()->probe();
+    $probe = Media::fromDisk('videos')->open('a.mp4')->rememberProbes()->probe();
+
+    expect($probe->duration())->toBe(120.12);
+    Process::assertRanTimes(fn ($process) => true, 1);
+
+    Storage::disk('videos')->put('a.mp4', 'a new version');
+    Media::fromDisk('videos')->open('a.mp4')->rememberProbes()->probe();
+
+    Process::assertRanTimes(fn ($process) => true, 2);
+});
+
+it('probes again for every opener without rememberProbes', function () {
+    fakeExecutable(Executable::FFProbe);
+    Storage::fake('videos');
+    Process::fake(['*' => Process::result(output: file_get_contents(fixture('ffprobe.json')))]);
+
+    Media::fromDisk('videos')->open('a.mp4')->probe();
+    Media::fromDisk('videos')->open('a.mp4')->probe();
+
+    Process::assertRanTimes(fn ($process) => true, 2);
+});
+
 it('exposes the source disk and opened paths', function () {
     Storage::fake('videos');
 
