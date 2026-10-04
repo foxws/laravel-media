@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Foxws\Media\FFMpeg;
 
+use Illuminate\Contracts\Support\Arrayable;
+
 /**
  * A stretch of video between two scene changes.
+ *
+ * @implements Arrayable<string, float|null>
  */
-final readonly class Scene
+final readonly class Scene implements Arrayable
 {
     /**
      * @param  float|null  $score  How strongly the scene differs from the previous one (0-1), null for the first scene.
@@ -17,6 +21,22 @@ final readonly class Scene
         public float $end,
         public ?float $score,
     ) {}
+
+    /**
+     * Restore a scene stored with toArray(), e.g. from a JSON column.
+     *
+     * @param  array<string, mixed>  $scene
+     */
+    public static function fromArray(array $scene): self
+    {
+        $score = $scene['score'] ?? null;
+
+        return new self(
+            start: (float) ($scene['start'] ?? 0),
+            end: (float) ($scene['end'] ?? 0),
+            score: is_numeric($score) ? (float) $score : null,
+        );
+    }
 
     public function duration(): float
     {
@@ -31,5 +51,17 @@ final readonly class Scene
         $end = $maximumDuration !== null ? min($this->end, $this->start + $maximumDuration) : $this->end;
 
         return Clip::make($this->start, $end, $path);
+    }
+
+    /**
+     * @return array{start: float, end: float, score: float|null}
+     */
+    public function toArray(): array
+    {
+        return [
+            'start' => $this->start,
+            'end' => $this->end,
+            'score' => $this->score,
+        ];
     }
 }

@@ -9,6 +9,7 @@ use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\Executables\Executable;
+use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\ThumbnailsResult;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
@@ -58,6 +59,11 @@ class DirectStream
     protected ?array $subtitles = null;
 
     protected ?ThumbnailsResult $thumbnails = null;
+
+    /** @var list<Marker> */
+    protected array $markers = [];
+
+    protected bool $chapters = false;
 
     public function __construct(
         protected Opener $opener,
@@ -176,6 +182,7 @@ class DirectStream
             '#EXT-X-TARGETDURATION:'.(int) ceil($duration),
             '#EXT-X-MEDIA-SEQUENCE:0',
             '#EXT-X-PLAYLIST-TYPE:VOD',
+            ...$this->programDateTime(),
             '#EXTINF:'.number_format($duration, 6, '.', '').',',
             $url,
             '#EXT-X-ENDLIST',
@@ -272,6 +279,7 @@ class DirectStream
             '#EXT-X-MEDIA-SEQUENCE:0',
             '#EXT-X-PLAYLIST-TYPE:VOD',
             '#EXT-X-IMAGES-ONLY',
+            ...$this->programDateTime(),
         ];
 
         foreach (array_keys($thumbnails->sprites) as $sheet) {
@@ -296,6 +304,58 @@ class DirectStream
         $path = $thumbnails->sprites[$sheet] ?? throw SegmentNotFoundException::forSheet($sheet);
 
         return $this->fileResponse($path, $this->imageType($thumbnails), $thumbnails->disk);
+    }
+
+    /**
+     * Offer named time ranges, like an intro or the credits, as #EXT-X-DATERANGE tags in the HLS media
+     * playlists and as Events in the DASH manifest.
+     *
+     * @param  list<Marker>  $markers
+     */
+    public function withMarkers(array $markers): static
+    {
+        $this->markers = [...$this->markers, ...$markers];
+
+        return $this;
+    }
+
+    /**
+     * Offer the chapters of the first opened file as markers of the class "chapter".
+     */
+    public function withChapters(bool $chapters = true): static
+    {
+        $this->chapters = $chapters;
+
+        return $this;
+    }
+
+    /**
+     * Offer scenes as markers of the class "scene". Detect them ahead with scenes(), e.g. in the job
+     * that stores the video, and keep them with toArray(); detection decodes the whole video.
+     *
+     * @param  list<Scene>  $scenes
+     */
+    public function withScenes(array $scenes): static
+    {
+        return $this->withMarkers(array_map(Marker::fromScene(...), $scenes));
+    }
+
+    /**
+     * The markers of the stream, chapters included, in order of their start.
+     *
+     * @return list<Marker>
+     */
+    public function markers(): array
+    {
+        $markers = $this->markers;
+
+        if ($this->chapters && ($path = $this->opener->paths()[0] ?? null) !== null) {
+            $markers = [...array_map(Marker::fromChapter(...), $this->opener->probe($path)->chapters()), ...$markers];
+        }
+
+        usort($markers, fn (Marker $a, Marker $b): int => $a->start <=> $b->start);
+
+        return $markers;
     }
 
     /**
@@ -462,6 +522,7 @@ class DirectStream
             $lines[] = '#EXT-X-MAP:URI="'.$map.'"';
         }
 
+        $lines = [...$lines, ...$this->dateRanges()];
         $period = null;
 
         foreach ($segments as $segment) {
@@ -540,6 +601,7 @@ class DirectStream
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-main:2011" type="static" mediaPresentationDuration="'.$this->isoDuration($duration).'" minBufferTime="'.$this->isoDuration($this->targetDuration()).'">',
             '  <Period id="0" start="PT0S">',
+            ...$this->eventStreams(),
             ...$sets,
             '  </Period>',
             '</MPD>',
@@ -844,6 +906,88 @@ class DirectStream
         }
 
         return $lines;
+    }
+
+    /**
+     * Anchors the playlist at the epoch, so marker dates map to seconds of the stream. Only added with
+     * markers, since #EXT-X-DATERANGE needs it.
+     *
+     * @return list<string>
+     */
+    protected function programDateTime(): array
+    {
+        return $this->markers() !== [] ? ['#EXT-X-PROGRAM-DATE-TIME:'.$this->date(0.0)] : [];
+    }
+
+    /**
+     * The #EXT-X-DATERANGE lines of the markers, after the #EXT-X-PROGRAM-DATE-TIME they're relative to.
+     *
+     * @return list<string>
+     */
+    protected function dateRanges(): array
+    {
+        $lines = $this->programDateTime();
+
+        foreach ($this->markers() as $index => $marker) {
+            $attributes = [
+                'ID' => '"'.$this->quoted("{$marker->class}-{$index}").'"',
+                'CLASS' => '"'.$this->quoted($marker->class).'"',
+                'START-DATE' => '"'.$this->date($marker->start).'"',
+                'DURATION' => $marker->duration() !== null ? number_format($marker->duration(), 3, '.', '') : null,
+                'X-TITLE' => $marker->title !== null ? '"'.$this->quoted($marker->title).'"' : null,
+            ];
+
+            $attributes = array_filter($attributes, fn (?string $value): bool => $value !== null);
+
+            $lines[] = '#EXT-X-DATERANGE:'.implode(',', array_map(fn (string $key, string $value): string => "{$key}={$value}", array_keys($attributes), $attributes));
+        }
+
+        return $lines;
+    }
+
+    /**
+     * One EventStream per marker class, with the times in milliseconds from the start of the Period.
+     *
+     * @return list<string>
+     */
+    protected function eventStreams(): array
+    {
+        $classes = [];
+
+        foreach ($this->markers() as $index => $marker) {
+            $duration = $marker->duration() !== null ? ' duration="'.(int) round($marker->duration() * 1000).'"' : '';
+            $event = '      <Event id="'.$index.'" presentationTime="'.(int) round($marker->start * 1000).'"'.$duration;
+
+            $classes[$marker->class][] = $marker->title !== null ? $event.'>'.$this->xml($marker->title).'</Event>' : $event.'/>';
+        }
+
+        $lines = [];
+
+        foreach ($classes as $class => $events) {
+            $lines[] = '    <EventStream schemeIdUri="'.Marker::SCHEME.'" value="'.$this->xml((string) $class).'" timescale="1000">';
+            $lines = [...$lines, ...$events];
+            $lines[] = '    </EventStream>';
+        }
+
+        return $lines;
+    }
+
+    /**
+     * An ISO 8601 date the given seconds after the epoch.
+     */
+    protected function date(float $seconds): string
+    {
+        $milliseconds = (int) round($seconds * 1000);
+
+        return gmdate('Y-m-d\\TH:i:s', intdiv($milliseconds, 1000)).sprintf('.%03dZ', $milliseconds % 1000);
+    }
+
+    /**
+     * A value for a quoted-string attribute, which can't hold double quotes or line breaks.
+     */
+    protected function quoted(string $value): string
+    {
+        return str_replace(['"', "\r", "\n"], ["'", ' ', ' '], $value);
     }
 
     /**

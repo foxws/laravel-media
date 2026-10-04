@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Delivery\Marker;
 use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Delivery\Subtitle;
 use Foxws\Media\Delivery\Track;
@@ -10,6 +11,7 @@ use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\ThumbnailsResult;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Testing\FakeProbe;
@@ -560,4 +562,85 @@ it('serves sprite sheets from their disk', function () {
         ->and($redirect)->toBeInstanceOf(RedirectResponse::class)
         ->and(fn () => $stream->thumbnailResponse(5))->toThrow(SegmentNotFoundException::class, "Thumbnail sheet 5 doesn't exist.")
         ->and(fn () => $stream->withThumbnails(null)->thumbnailPlaylist(fn () => 'sheet'))->toThrow(SegmentNotFoundException::class, 'This stream has no thumbnails.');
+});
+
+/**
+ * A video of 13 seconds with two chapters.
+ *
+ * @return array<string, mixed>
+ */
+function videoWithChapters(): array
+{
+    return [...FakeProbe::video(duration: 13), 'chapters' => [
+        ['start_time' => '0.000000', 'end_time' => '6.000000', 'tags' => ['title' => 'Opening']],
+        ['start_time' => '6.000000', 'end_time' => '13.000000', 'tags' => ['title' => 'The "end"']],
+    ]];
+}
+
+it('lists added markers, scenes and the chapters of the first file in order of their start', function () {
+    Media::fake(['video.mp4' => videoWithChapters()]);
+
+    $markers = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->withMarkers([new Marker(8.5, title: 'Twist', class: 'highlight')])
+        ->withScenes([new Scene(2, 7, 0.4)])
+        ->withChapters()
+        ->markers();
+
+    expect(array_map(fn (Marker $marker) => [$marker->class, $marker->start], $markers))->toBe([
+        ['chapter', 0.0],
+        ['scene', 2.0],
+        ['chapter', 6.0],
+        ['highlight', 8.5],
+    ]);
+});
+
+it('adds the markers as date ranges to the media playlists, anchored at the epoch', function () {
+    Media::fake(['video.mp4' => videoWithChapters()]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withChapters()
+        ->withMarkers([new Marker(8.5, title: "Line\nbreak", class: 'highlight')]);
+
+    $tags = [
+        '#EXT-X-PROGRAM-DATE-TIME:1970-01-01T00:00:00.000Z',
+        '#EXT-X-DATERANGE:ID="chapter-0",CLASS="chapter",START-DATE="1970-01-01T00:00:00.000Z",DURATION=6.000,X-TITLE="Opening"',
+        '#EXT-X-DATERANGE:ID="chapter-1",CLASS="chapter",START-DATE="1970-01-01T00:00:06.000Z",DURATION=7.000,X-TITLE="The \'end\'"',
+        '#EXT-X-DATERANGE:ID="highlight-2",CLASS="highlight",START-DATE="1970-01-01T00:00:08.500Z",X-TITLE="Line break"',
+        '#EXTINF:6.000000,',
+    ];
+
+    expect($stream->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts"))->toContain(implode("\n", $tags))
+        ->and($stream->fragmented()->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.m4s", initUrl: fn () => 'init.mp4'))
+        ->toContain('#EXT-X-MAP:URI="init.mp4"'."\n".implode("\n", $tags));
+});
+
+it('anchors the subtitle and image playlists at the epoch too when the stream has markers', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('en.vtt')->withThumbnails(thumbnailSheets());
+
+    expect($stream->subtitlePlaylist(0, 'en.vtt'))->not->toContain('#EXT-X-PROGRAM-DATE-TIME')
+        ->and($stream->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts"))->not->toContain('#EXT-X-PROGRAM-DATE-TIME');
+
+    $stream->withMarkers([new Marker(1)]);
+
+    expect($stream->subtitlePlaylist(0, 'en.vtt'))->toContain("#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-PROGRAM-DATE-TIME:1970-01-01T00:00:00.000Z\n#EXTINF")
+        ->and($stream->thumbnailPlaylist(fn (int $sheet) => "{$sheet}.jpg"))->toContain("#EXT-X-IMAGES-ONLY\n#EXT-X-PROGRAM-DATE-TIME:1970-01-01T00:00:00.000Z\n#EXTINF");
+});
+
+it('adds the markers to the dash manifest as an event stream per class', function () {
+    Media::fake(['video.mp4' => videoWithChapters()]);
+
+    $manifest = Media::fromDisk('videos')->open('video.mp4')->stream()->withChapters()
+        ->withMarkers([new Marker(8.5, title: 'A & B', class: 'highlight')])
+        ->dashManifest(fn () => 'init', fn () => 'segment');
+
+    expect($manifest)->toContain(implode("\n", [
+        '  <Period id="0" start="PT0S">',
+        '    <EventStream schemeIdUri="urn:foxws:media:marker" value="chapter" timescale="1000">',
+        '      <Event id="0" presentationTime="0" duration="6000">Opening</Event>',
+        '      <Event id="1" presentationTime="6000" duration="7000">The &quot;end&quot;</Event>',
+        '    </EventStream>',
+        '    <EventStream schemeIdUri="urn:foxws:media:marker" value="highlight" timescale="1000">',
+        '      <Event id="2" presentationTime="8500">A &amp; B</Event>',
+        '    </EventStream>',
+        '    <AdaptationSet id="0"',
+    ]));
 });
