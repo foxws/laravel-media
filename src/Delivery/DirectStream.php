@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
@@ -49,6 +50,9 @@ class DirectStream
 
     /** @var (Closure(int, int): string)|null */
     protected ?Closure $keyUrl = null;
+
+    /** @var (Closure(): string)|null */
+    protected ?Closure $licenseUrl = null;
 
     protected ?int $rotateEvery = null;
 
@@ -380,9 +384,11 @@ class DirectStream
     }
 
     /**
-     * Encrypt segments with AES-128 for each request. The cached segments stay unencrypted, so they
-     * can be served with any key. Players fetch the key from the key URL; serve it with keyResponse().
-     * Route::mediaStream() sets the key URL itself.
+     * Encrypt segments for each request; the cached segments stay unencrypted, so they can be served
+     * with any key. MPEG-TS segments are encrypted whole with AES-128, and HLS players fetch the key
+     * from the key URL (keyResponse()). Fragmented MP4 segments use Common Encryption (cenc) with one
+     * key: CMAF playlists fetch it from the key URL too, and DASH players request it as a ClearKey
+     * license from the license URL (licenseResponse()). Route::mediaStream() sets both URLs itself.
      *
      * @param  EncryptionKey|callable(int): EncryptionKey  $key  A key, or a resolver that receives the rotation period,
      *                                                           e.g. fn (int $period) => EncryptionKey::derive($secret, "video:1:{$period}").
@@ -410,6 +416,18 @@ class DirectStream
     public function keyUrlsUsing(callable $keyUrl): static
     {
         $this->keyUrl = $keyUrl(...);
+
+        return $this;
+    }
+
+    /**
+     * Where DASH players request the ClearKey license of an encrypted stream.
+     *
+     * @param  callable(): string  $licenseUrl
+     */
+    public function licenseUrlUsing(callable $licenseUrl): static
+    {
+        $this->licenseUrl = $licenseUrl(...);
 
         return $this;
     }
@@ -445,6 +463,17 @@ class DirectStream
     }
 
     /**
+     * The ClearKey license of an encrypted fragmented stream: its key as a JSON Web Key Set, for any
+     * license request. Authorize the request first.
+     */
+    public function licenseResponse(): Response
+    {
+        return new JsonResponse(['keys' => [$this->key()->toJsonWebKey()], 'type' => 'temporary'], 200, [
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
+
+    /**
      * The master playlist, listing every opened file as a variant. Fragmented streams list the video
      * track of every file with video, and the audio track of the first file with audio as the audio rendition.
      *
@@ -471,7 +500,7 @@ class DirectStream
             return implode("\n", [...$lines, ...$images])."\n";
         }
 
-        $this->ensureUnencrypted();
+        $this->ensureOneKey();
 
         $lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS', ...$subtitles];
         $audio = $this->audioVariant();
@@ -513,19 +542,20 @@ class DirectStream
         $map = null;
 
         if ($this->fragmented || $track !== null) {
-            $this->ensureUnencrypted();
+            $this->ensureOneKey();
 
             $track ??= $this->probe($variant)->hasVideo() ? Track::Video : Track::Audio;
             $this->ensureTrack($variant, $track);
+            $this->ensureEncryptable($variant, $track);
 
             $map = $initUrl !== null
                 ? $initUrl($variant, $track)
                 : throw new InvalidArgumentException('Fragmented streams need the URL of the initialization segment.');
         }
 
-        if ($this->keys !== null && $this->keyUrl === null) {
-            throw new InvalidArgumentException('Encrypted streams need a key URL. Pass one to withEncryption() or keyUrlsUsing().');
-        }
+        $keyUrl = $this->keys !== null
+            ? $this->keyUrl ?? throw new InvalidArgumentException('Encrypted streams need a key URL. Pass one to withEncryption() or keyUrlsUsing().')
+            : null;
 
         $index = $this->index($variant);
         $segments = $index->segments($this->targetDuration());
@@ -540,6 +570,12 @@ class DirectStream
 
         if ($map !== null) {
             $lines[] = '#EXT-X-INDEPENDENT-SEGMENTS';
+
+            // Players read the key ID from the initialization segment and use the key as a ClearKey.
+            if ($keyUrl !== null) {
+                $lines[] = '#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI="'.$keyUrl(0, $variant).'",KEYFORMAT="identity",KEYFORMATVERSIONS="1"';
+            }
+
             $lines[] = '#EXT-X-MAP:URI="'.$map.'"';
         }
 
@@ -547,10 +583,10 @@ class DirectStream
         $period = null;
 
         foreach ($segments as $segment) {
-            if ($this->keys !== null && $this->keyUrl !== null && $period !== $this->period($segment->index)) {
+            if ($map === null && $keyUrl !== null && $period !== $this->period($segment->index)) {
                 $period = $this->period($segment->index);
 
-                $lines[] = '#EXT-X-KEY:METHOD=AES-128,URI="'.($this->keyUrl)($period, $variant).'"';
+                $lines[] = '#EXT-X-KEY:METHOD=AES-128,URI="'.$keyUrl($period, $variant).'"';
             }
 
             $lines[] = '#EXTINF:'.number_format($segment->duration, 6, '.', '').',';
@@ -575,7 +611,11 @@ class DirectStream
      */
     public function dashManifest(callable $initUrl, callable $segmentUrl, ?callable $subtitleUrl = null, ?callable $thumbnailUrl = null): string
     {
-        $this->ensureUnencrypted();
+        $this->ensureOneKey();
+
+        if ($this->keys !== null && $this->licenseUrl === null) {
+            throw new InvalidArgumentException('Encrypted DASH streams need a license URL. Pass one to licenseUrlUsing().');
+        }
 
         if ($this->subtitles() !== [] && $subtitleUrl === null) {
             throw new InvalidArgumentException('Streams with subtitles need the URLs of their WebVTT files.');
@@ -585,16 +625,22 @@ class DirectStream
         $sets = [];
 
         if (($videos = $this->videoVariants()) !== []) {
+            foreach ($videos as $variant) {
+                $this->ensureEncryptable($variant, Track::Video);
+            }
+
             $representations = array_map(fn (int $variant): string => $this->representation($variant, Track::Video, $initUrl, $segmentUrl), $videos);
 
-            $sets[] = '    <AdaptationSet id="0" contentType="video" mimeType="video/mp4" startWithSAP="1">'."\n".implode("\n", $representations)."\n".'    </AdaptationSet>';
+            $sets[] = implode("\n", ['    <AdaptationSet id="0" contentType="video" mimeType="video/mp4" startWithSAP="1">', ...$this->contentProtection(), ...$representations, '    </AdaptationSet>']);
         }
 
         if (($audio = $this->audioVariant()) !== null) {
+            $this->ensureEncryptable($audio, Track::Audio);
+
             $language = $this->probe($audio)->audioStream()?->language;
             $lang = $language !== null && $language !== 'und' ? ' lang="'.$this->xml($language).'"' : '';
 
-            $sets[] = '    <AdaptationSet id="1" contentType="audio" mimeType="audio/mp4"'.$lang.' startWithSAP="1">'."\n".$this->representation($audio, Track::Audio, $initUrl, $segmentUrl)."\n".'    </AdaptationSet>';
+            $sets[] = implode("\n", ['    <AdaptationSet id="1" contentType="audio" mimeType="audio/mp4"'.$lang.' startWithSAP="1">', ...$this->contentProtection(), $this->representation($audio, Track::Audio, $initUrl, $segmentUrl), '    </AdaptationSet>']);
         }
 
         // Text sets point straight at the WebVTT file, without SegmentBase, which players load as one segment.
@@ -620,7 +666,7 @@ class DirectStream
 
         return implode("\n", [
             '<?xml version="1.0" encoding="UTF-8"?>',
-            '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-main:2011" type="static" mediaPresentationDuration="'.$this->isoDuration($duration).'" minBufferTime="'.$this->isoDuration($this->targetDuration()).'">',
+            '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011"'.($this->keys !== null ? ' xmlns:cenc="urn:mpeg:cenc:2013" xmlns:dashif="https://dashif.org/CPS"' : '').' profiles="urn:mpeg:dash:profile:isoff-main:2011" type="static" mediaPresentationDuration="'.$this->isoDuration($duration).'" minBufferTime="'.$this->isoDuration($this->targetDuration()).'">',
             '  <Period id="0" start="PT0S">',
             ...$this->eventStreams(),
             ...$sets,
@@ -708,13 +754,20 @@ class DirectStream
 
         $this->packageAhead($variant, 1, $track);
 
+        if ($this->keys !== null) {
+            $this->ensureOneKey();
+            $this->ensureEncryptable($variant, $track);
+
+            return $this->encryptedResponse(CommonEncryption::init((string) $this->cacheDisk()->get($path), $this->key()), $track->contentType());
+        }
+
         return $this->fileResponse($path, $track->contentType());
     }
 
     /**
      * A response for a segment: a redirect to a temporary URL when the cache disk provides them
      * (e.g. S3), otherwise the file itself. Encrypted streams always respond with the segment,
-     * encrypted with the key of its rotation period.
+     * encrypted with the key of its rotation period, or with Common Encryption when fragmented.
      *
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
@@ -722,11 +775,23 @@ class DirectStream
     public function segmentResponse(int $variant, int $index, ?Track $track = null): Response
     {
         if ($track !== null) {
-            $this->ensureUnencrypted();
+            if ($this->keys !== null) {
+                $this->ensureOneKey();
+                $this->ensureEncryptable($variant, $track);
+            }
 
             $path = $this->segment($variant, $index, $track);
 
             $this->packageAhead($variant, $index + 1, $track);
+
+            if ($this->keys !== null) {
+                $init = (string) $this->cacheDisk()->get($this->initSegment($variant, $track));
+
+                return $this->encryptedResponse(
+                    CommonEncryption::segment($init, (string) $this->cacheDisk()->get($path), $this->key(), "{$variant}|{$track->value}|{$index}"),
+                    $track->contentType(),
+                );
+            }
 
             return $this->fileResponse($path, $track->contentType());
         }
@@ -736,13 +801,18 @@ class DirectStream
         $this->packageAhead($variant, $index + 1);
 
         if ($this->keys !== null) {
-            return new Response($this->encrypt((string) $this->cacheDisk()->get($path), $index), 200, [
-                'Content-Type' => 'video/mp2t',
-                'Cache-Control' => 'private, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
-            ]);
+            return $this->encryptedResponse($this->encrypt((string) $this->cacheDisk()->get($path), $index), 'video/mp2t');
         }
 
         return $this->fileResponse($path, 'video/mp2t');
+    }
+
+    protected function encryptedResponse(string $content, string $contentType): Response
+    {
+        return new Response($content, 200, [
+            'Content-Type' => $contentType,
+            'Cache-Control' => 'private, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
+        ]);
     }
 
     /**
@@ -1243,15 +1313,48 @@ class DirectStream
     }
 
     /**
-     * Per-request AES-128 encrypts whole MPEG-TS segments; fragmented MP4 would need sample encryption (CENC).
+     * Fragmented MP4 segments name their key in the initialization segment, which every segment of a track shares.
      *
      * @throws InvalidArgumentException
      */
-    protected function ensureUnencrypted(): void
+    protected function ensureOneKey(): void
     {
-        if ($this->keys !== null) {
-            throw new InvalidArgumentException('Encrypted direct streams use MPEG-TS segments. Package with encryption for encrypted fragmented MP4 or DASH.');
+        if ($this->keys !== null && $this->rotateEvery !== null) {
+            throw new InvalidArgumentException('Fragmented MP4 and DASH streams are encrypted with one key. Rotate keys with MPEG-TS segments only.');
         }
+    }
+
+    /**
+     * @throws InvalidMediaException
+     */
+    protected function ensureEncryptable(int $variant, Track $track): void
+    {
+        $probe = $this->probe($variant);
+        $codec = ($track === Track::Video ? $probe->videoStream() : $probe->audioStream())?->codecName;
+
+        if ($this->keys !== null && FragmentedMp4Codec::tryFrom((string) $codec)?->isEncryptable() === false) {
+            throw InvalidMediaException::notEncryptable((string) $codec);
+        }
+    }
+
+    /**
+     * The ContentProtection descriptors of an encrypted adaptation set: Common Encryption with the key
+     * ID, and ClearKey with the license URL.
+     *
+     * @return list<string>
+     */
+    protected function contentProtection(): array
+    {
+        if ($this->keys === null || $this->licenseUrl === null) {
+            return [];
+        }
+
+        return [
+            '      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="'.$this->key()->keyIdUuid().'"/>',
+            '      <ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e" value="ClearKey1.0">',
+            '        <dashif:Laurl>'.$this->xml(($this->licenseUrl)()).'</dashif:Laurl>',
+            '      </ContentProtection>',
+        ];
     }
 
     /**

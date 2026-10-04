@@ -21,8 +21,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Serves the routes of Route::mediaStream(): HLS with fragmented MP4 (CMAF) or MPEG-TS segments,
- * DASH with the same fragmented MP4 segments, WebVTT subtitles, thumbnail sprite sheets, and the keys of
- * encrypted MPEG-TS streams.
+ * DASH with the same fragmented MP4 segments, WebVTT subtitles, thumbnail sprite sheets, and the keys and
+ * ClearKey license of encrypted streams.
  */
 class MediaStreamController
 {
@@ -206,6 +206,20 @@ class MediaStreamController
     }
 
     /**
+     * The ClearKey license DASH players request for encrypted fragmented MP4 segments.
+     */
+    public function license(Request $request): Response
+    {
+        [, $stream] = $this->resolve($request);
+
+        if (! $stream->isEncrypted()) {
+            throw new NotFoundHttpException('This stream is not encrypted.');
+        }
+
+        return $stream->licenseResponse();
+    }
+
+    /**
      * @return array{StreamDefinition, DirectStream}
      */
     protected function resolve(Request $request): array
@@ -220,7 +234,8 @@ class MediaStreamController
         $stream = $definition->resolve(Arr::except($route->parameters(), self::STREAM_PARAMETERS));
 
         if ($stream->isEncrypted()) {
-            $stream->keyUrlsUsing(fn (int $period, int $variant): string => $this->url($request, $definition, 'key', ['variant' => $variant, 'period' => $period]));
+            $stream->keyUrlsUsing(fn (int $period, int $variant): string => $this->url($request, $definition, 'key', ['variant' => $variant, 'period' => $period]))
+                ->licenseUrlUsing(fn (): string => $this->url($request, $definition, 'license', []));
         }
 
         return [$definition, $stream];
