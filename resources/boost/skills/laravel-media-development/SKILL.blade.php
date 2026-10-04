@@ -363,6 +363,33 @@ $result->path();    // "videos/1/master.m3u8" (manifests come first in paths())
 - **Drivers:** `media.packager.default` (`MEDIA_PACKAGER`) picks the default. Register another with `app(PackagerManager::class)->extend('name', fn () => new MyPackager)`, implementing `Foxws\Media\Packaging\Packager`, and choose it per export with `->using('name')`.
 - **Under `Media::fake()`**, packaging writes placeholder segments and manifests.
 
+### The native packager (no Shaka Packager)
+
+`->using('native')` packages with ffmpeg and the same segmenting, playlists and encryption as direct streams, so only ffmpeg and ffprobe need to be installed:
+
+@boostsnippet("Native packaging", "php")
+Media::fromDisk('renditions')->open(['1080.mp4', '720.mp4'])
+    ->exportAsStreams()
+    ->using('native')
+    ->withEncryption()                       // cenc (ClearKey); HLS playlists point at the key file
+    ->toDisk('streams')
+    ->save("videos/{$video->id}");
+@endboostsnippet
+
+- **Output:**
+  - CMAF only: fragmented MP4 segments, which HLS and DASH share.
+  - Each stream's output name without its extension is its directory, e.g. `0_video.mp4` gives `0_video/init.mp4`, `0_video/{n}.m4s` and the `0_video.m3u8` media playlist.
+  - Playlists and the manifest link everything relatively, also across directories.
+- **Subtitles:**
+  - DASH gets `{name}.vtt`.
+  - HLS gets `{name}.m3u8` with `{name}-hls.vtt`, which is mapped onto the segment timestamps.
+- **Segments are cut on keyframes** with `ffmpeg -c copy`, one run per segment and track, and kept on `media.delivery.cache_disk`. A file that's already been played directly is packaged from the cache without running ffmpeg again. Run it in a queued job for long videos.
+- **Encryption:**
+  - `cenc` with one key, written to the key file.
+  - HLS playlists get `#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,KEYFORMAT="identity"`.
+  - The DASH manifest names the key ID with a ClearKey `ContentProtection` but has no license URL, so give players the key (Shaka Player's `drm.clearKeys`), or serve it through `Route::mediaStream()` instead.
+- **Not supported:** Shaka options (`withOption()`), live playlist types, cbcs, key rotation, a clear lead, and more than one audio stream. These throw `InvalidArgumentException`; use the Shaka driver for them.
+
 ### Encryption
 
 @boostsnippet("AES encryption", "php")
