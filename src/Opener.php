@@ -27,7 +27,7 @@ use Illuminate\Support\Traits\Macroable;
 
 /**
  * One or more opened media files on a disk. Packages add their own tools with macros, e.g.
- * Opener::macro('abAv1', fn () => new AbAv1Builder($this)).
+ * Opener::macro('encoder', fn () => new EncoderBuilder($this)).
  */
 class Opener
 {

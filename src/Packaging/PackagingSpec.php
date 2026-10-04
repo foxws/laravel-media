@@ -13,7 +13,7 @@ final readonly class PackagingSpec
      * @param  list<PackagingStream>  $streams
      * @param  string|null  $dashManifest  The DASH manifest, relative to the export directory.
      * @param  string|null  $hlsPlaylist  The HLS master playlist, relative to the export directory.
-     * @param  array<string, string|int|float|bool|null>  $options  Extra driver-specific options, e.g. ['low_latency_dash_mode' => true] for Shaka.
+     * @param  array<string, string|int|float|bool|null>  $options  Extra driver-specific options, e.g. ['low_latency_dash_mode' => true].
      */
     public function __construct(
         public array $streams,

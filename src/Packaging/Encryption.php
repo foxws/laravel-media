@@ -14,7 +14,7 @@ use InvalidArgumentException;
 final readonly class Encryption
 {
     /**
-     * @param  ProtectionScheme|null  $scheme  Null uses the packager's default (cenc for Shaka). Use cbcs for one set of segments that plays with both HLS and DASH, including Safari.
+     * @param  ProtectionScheme|null  $scheme  Null uses the packager's default (cenc). Use cbcs for one set of segments that plays with both HLS and DASH, including Safari.
      * @param  string|null  $keyFile  A file name for the raw key, written next to the segments; null to serve the key yourself.
      * @param  string|null  $keyUri  The key URI written into HLS playlists; defaults to the key file name.
      * @param  int|null  $rotation  Seconds after which a new key is used. Later keys are derived from this one by the packager.

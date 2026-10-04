@@ -21,7 +21,7 @@ class PackagerManager extends Manager
     }
 
     /**
-     * Packages with ffmpeg and the direct stream playlists, without Shaka Packager.
+     * Packages with ffmpeg and the direct stream playlists.
      */
     public function createNativeDriver(): NativePackager
     {

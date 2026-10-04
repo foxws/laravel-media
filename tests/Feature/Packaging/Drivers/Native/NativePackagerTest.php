@@ -122,7 +122,7 @@ it('describes the segmenting instead of one command line', function () {
         ->toBe('native: ffmpeg -c copy per segment of video video.mp4, audio video.mp4 into output');
 });
 
-it('refuses what only shaka packager supports', function (Closure $configure, string $unsupported) {
+it('refuses what it does not support', function (Closure $configure, string $unsupported) {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
     Storage::disk('videos')->put('other.mp4', 'video');
 

@@ -41,8 +41,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | The driver that packages encoded media into DASH and HLS. "native" needs
-    | only ffmpeg; foxws/laravel-shaka adds a "shaka" driver for Shaka
-    | Packager. Register others with PackagerManager::extend().
+    | only ffmpeg. Register others with PackagerManager::extend().
     |
     */
 

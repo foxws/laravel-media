@@ -21,7 +21,7 @@ use Foxws\Media\Packaging\StreamType;
 use InvalidArgumentException;
 
 /**
- * Packages HLS (fragmented MP4) and DASH without Shaka Packager, with the same ffmpeg segmenting,
+ * Packages HLS (fragmented MP4) and DASH with only ffmpeg, using the same segmenting,
  * playlists and encryption as direct streams. Each stream's output name, without its extension, is
  * the directory of its segments: "0_video.mp4" gives 0_video/init.mp4, 0_video/{n}.m4s and the
  * 0_video.m3u8 media playlist. Segments already cut for direct play are reused from the cache disk.
@@ -213,7 +213,7 @@ class NativePackager implements Packager
         ]);
 
         if ($unsupported !== []) {
-            throw new InvalidArgumentException('The native packager does not support '.implode(', ', array_keys($unsupported)).'. Package with the shaka driver of foxws/laravel-shaka instead.');
+            throw new InvalidArgumentException('The native packager does not support '.implode(', ', array_keys($unsupported)).'.');
         }
     }
 }
