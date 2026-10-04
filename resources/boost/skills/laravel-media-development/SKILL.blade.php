@@ -83,18 +83,33 @@ $index->longestSegment(6);  // the HLS target duration
 
 `stream()` serves the opened files as HLS without packaging them first, like nginx-vod-module: playlists come from the keyframe index, and each segment is copied into MPEG-TS the first time it's requested, then kept on a cache disk. Store each video once, as H.264/HEVC with AAC/MP3/AC-3. Every opened file is one variant, for example renditions of one video.
 
+@boostsnippet("Direct HLS routes", "php")
+use Foxws\Media\Facades\MediaStream;
+
+// AppServiceProvider::boot(): how a stream is resolved from its route parameters
+MediaStream::define('videos', function (Video $video) {
+    Gate::authorize('view', $video);
+
+    return Media::fromDisk('videos')->open($video->renditions());   // or ->stream()->segmentDuration(4)
+})->signed();   // optional: verify signatures and sign every URL in the playlists
+
+// routes/web.php: master.m3u8, {variant}/index.m3u8, {variant}/{segment}.ts and {variant}/keys/{period}.key
+Route::middleware('auth')->group(fn () => Route::mediaStream('videos/{video}', 'videos'));
+
+// the URL to give the player (signed when the stream is)
+MediaStream::url('videos', ['video' => $video]);
+@endboostsnippet
+
+- **Resolvers:** parameters typed as a model (any `UrlRoutable`) are bound like implicit route model binding (404 when missing); other parameters are injected by the container. Return an `Opener` or a configured `DirectStream`. Authorize inside the resolver or with route middleware.
+- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.master`, `.playlist`, `.segment` and `.key`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
+- **Signed streams:** `signed($lifetime)` rejects requests without a valid signature (403) and signs every playlist, segment and key URL for `$lifetime` seconds (default `media.delivery.url_lifetime`).
+
+For full control, call the stream yourself from your own routes:
+
 @boostsnippet("Direct HLS controller", "php")
-public function master(Video $video): Response
-{
-    $playlist = $video->streamable()->stream()   // Media::fromDisk(...)->open(['1080.mp4', '720.mp4'])
-        ->masterPlaylist(fn (int $variant) => URL::temporarySignedRoute('videos.variant', now()->addHours(4), [$video, $variant]));
-
-    return response($playlist, 200, ['Content-Type' => 'application/vnd.apple.mpegurl']);
-}
-
 public function variant(Video $video, int $variant): Response
 {
-    $playlist = $video->streamable()->stream()
+    $playlist = $video->streamable()->stream()   // Media::fromDisk(...)->open(['1080.mp4', '720.mp4'])
         ->mediaPlaylist($variant, fn (Segment $segment, int $variant) => URL::temporarySignedRoute('videos.segment', now()->addHours(4), [$video, $variant, $segment->index]));
 
     return response($playlist, 200, ['Content-Type' => 'application/vnd.apple.mpegurl']);
@@ -106,32 +121,31 @@ public function segment(Video $video, int $variant, int $segment): Response
 }
 @endboostsnippet
 
+- `masterPlaylist(fn (int $variant) => ...)` lists the variants with their bandwidth, resolution, frame rate and codecs.
 - **Segments:** `ffmpeg -ss … -t … -copyts -c copy -f mpegts` copies each segment exactly, because segments start on keyframes. S3 sources are read through signed URLs with range requests, so only the needed bytes are fetched. Concurrent requests for the same segment package it once (`Cache::lock`).
 - **The segment cache:** `media.delivery.cache_disk` can be local storage, a mounted `/tmp` or RAM disk, or S3 (override per stream with `toCache()`). Segments are keyed by file version, so a changed file gets new segments. On disks with temporary URLs, `segmentResponse()` redirects to one valid for `media.delivery.url_lifetime` seconds; otherwise it returns the file with long cache headers.
 - **Errors:** out-of-range segments and variants throw `SegmentNotFoundException` (a 404). Files with codecs MPEG-TS can't carry (VP9, AV1, Opus, ...) throw `InvalidMediaException`.
 - **Players:** hls.js and Safari play these TS segments natively. Shaka Player needs mux.js loaded (`window.muxjs`) to transmux them.
 - `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
+- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
 
 ### Encrypting direct streams
 
 @boostsnippet("Per-request AES-128", "php")
 use Foxws\Media\Encryption\EncryptionKey;
 
-$stream = Media::fromDisk('videos')->open($video->renditions())->stream()
+MediaStream::define('videos', fn (Video $video) => Media::fromDisk('videos')->open($video->renditions())->stream()
     ->withEncryption(
         fn (int $period) => EncryptionKey::derive(config('app.key'), "video:{$video->id}:{$period}"),
-        fn (int $period, int $variant) => URL::temporarySignedRoute('videos.key', now()->addHours(4), [$video, $period]),
         rotateEvery: 100,   // a new key every 100 segments; leave out for one key per playlist
-    );
-
-// key route, after authorizing the viewer:
-return $stream->keyResponse($period);
+    ));
 @endboostsnippet
 
+- **Key URLs:** `Route::mediaStream()` links and serves the keys itself. Without it, pass the key URL as the second argument of `withEncryption()` (or call `keyUrlsUsing()`), as `fn (int $period, int $variant) => ...`, and return `$stream->keyResponse($period)` from your key route after authorizing the viewer.
 - **How it works:** media playlists get `#EXT-X-KEY:METHOD=AES-128` tags, a new one for each rotation period. `segmentResponse()` encrypts each segment for the request with AES-128-CBC, using its period's key and its media sequence number as the IV (the HLS default, so playlists leave the IV out).
 - **What's cached:** segments stay unencrypted on the cache disk and are shared by every key. Keep that disk private. Encrypted streams are served by the app instead of redirecting to the cache disk.
 - **Keys:** `EncryptionKey::derive($secret, $context)` makes keys deterministic per context (HMAC-SHA256), so they don't need storing. Pass a fixed `EncryptionKey` instead of a callback for one stored key.
-- **Serving keys:** `keyResponse($period)` returns the raw 16-byte key with `no-store`, and `key($period)` returns the `EncryptionKey`. Always authorize the key route.
+- **Serving keys:** `keyResponse($period)` returns the raw 16-byte key with `no-store`, and `key($period)` returns the `EncryptionKey`. Always authorize the key route; with `Route::mediaStream()` the resolver and route middleware run for key requests too.
 
 ## Scenes, clips and reels
 
@@ -482,7 +496,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `packager.default` | Packager driver (`MEDIA_PACKAGER`, `shaka`) |
 | `executables.ffmpeg`, `.ffprobe`, `.packager`, `.ab-av1` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `delivery.segment_duration`, `.cache_store`, `.index_lifetime` | Segment length and keyframe index caching for streaming from stored files |
-| `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served |
+| `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served (`media:prune` trims the cache) |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |
@@ -529,6 +543,7 @@ public function handle(): void
 @boostsnippet("Scheduling media:clean", "php")
 // routes/console.php
 Schedule::command('media:clean')->hourly();
+Schedule::command('media:prune')->daily();
 
 // a job that shouldn't overlap for the same video
 public function middleware(): array

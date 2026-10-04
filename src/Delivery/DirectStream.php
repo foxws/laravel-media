@@ -72,23 +72,41 @@ class DirectStream
     /**
      * Encrypt segments with AES-128 for each request. The cached segments stay unencrypted, so they
      * can be served with any key. Players fetch the key from the key URL; serve it with keyResponse().
+     * Route::mediaStream() sets the key URL itself.
      *
      * @param  EncryptionKey|callable(int): EncryptionKey  $key  A key, or a resolver that receives the rotation period,
      *                                                           e.g. fn (int $period) => EncryptionKey::derive($secret, "video:1:{$period}").
-     * @param  callable(int, int): string  $keyUrl  Receives the rotation period and the variant, and returns the key's URL.
+     * @param  (callable(int, int): string)|null  $keyUrl  Receives the rotation period and the variant, and returns the key's URL.
      * @param  int|null  $rotateEvery  Use a new key every this many segments; null for one key per playlist.
      */
-    public function withEncryption(EncryptionKey|callable $key, callable $keyUrl, ?int $rotateEvery = null): static
+    public function withEncryption(EncryptionKey|callable $key, ?callable $keyUrl = null, ?int $rotateEvery = null): static
     {
         if ($rotateEvery !== null && $rotateEvery < 1) {
             throw new InvalidArgumentException('Keys must rotate after at least one segment.');
         }
 
         $this->keys = $key instanceof EncryptionKey ? fn (): EncryptionKey => $key : $key(...);
-        $this->keyUrl = $keyUrl(...);
+        $this->keyUrl = $keyUrl !== null ? $keyUrl(...) : null;
         $this->rotateEvery = $rotateEvery;
 
         return $this;
+    }
+
+    /**
+     * Where players fetch the keys of an encrypted stream.
+     *
+     * @param  callable(int, int): string  $keyUrl  Receives the rotation period and the variant, and returns the key's URL.
+     */
+    public function keyUrlsUsing(callable $keyUrl): static
+    {
+        $this->keyUrl = $keyUrl(...);
+
+        return $this;
+    }
+
+    public function isEncrypted(): bool
+    {
+        return $this->keys !== null;
     }
 
     /**
@@ -150,9 +168,14 @@ class DirectStream
      * @param  callable(Segment, int): string  $segmentUrl  Receives the segment and the variant's index and returns its URL.
      *
      * @throws SegmentNotFoundException
+     * @throws InvalidArgumentException
      */
     public function mediaPlaylist(int $variant, callable $segmentUrl): string
     {
+        if ($this->keys !== null && $this->keyUrl === null) {
+            throw new InvalidArgumentException('Encrypted streams need a key URL. Pass one to withEncryption() or keyUrlsUsing().');
+        }
+
         $index = $this->index($variant);
         $segments = $index->segments($this->targetDuration());
 
@@ -167,7 +190,7 @@ class DirectStream
         $period = null;
 
         foreach ($segments as $segment) {
-            if ($this->keyUrl !== null && $period !== $this->period($segment->index)) {
+            if ($this->keys !== null && $this->keyUrl !== null && $period !== $this->period($segment->index)) {
                 $period = $this->period($segment->index);
 
                 $lines[] = '#EXT-X-KEY:METHOD=AES-128,URI="'.($this->keyUrl)($period, $variant).'"';

@@ -192,3 +192,20 @@ it('needs encryption to serve keys and a positive rotation', function () {
     expect(fn () => $stream->keyResponse())->toThrow(InvalidArgumentException::class, 'not encrypted')
         ->and(fn () => $stream->withEncryption(EncryptionKey::generate(), fn () => 'key', rotateEvery: 0))->toThrow(InvalidArgumentException::class, 'at least one segment');
 });
+
+it('takes the key urls separately and needs them for the media playlist', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption(EncryptionKey::generate());
+
+    expect($stream->isEncrypted())->toBeTrue()
+        ->and(fn () => $stream->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts"))->toThrow(InvalidArgumentException::class, 'need a key URL')
+        ->and($stream->keyUrlsUsing(fn (int $period) => "key/{$period}")->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts"))->toContain('URI="key/0"');
+});
+
+it('adds no keys to unencrypted streams', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->keyUrlsUsing(fn () => 'key');
+
+    expect($stream->isEncrypted())->toBeFalse()
+        ->and($stream->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts"))->not->toContain('#EXT-X-KEY');
+});
