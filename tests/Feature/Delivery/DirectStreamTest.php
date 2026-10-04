@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Delivery\LookAheadStrategy;
 use Foxws\Media\Delivery\Marker;
+use Foxws\Media\Delivery\PackageSegments;
 use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Delivery\Subtitle;
 use Foxws\Media\Delivery\Track;
@@ -15,6 +17,8 @@ use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\ThumbnailsResult;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Testing\FakeProbe;
+use Illuminate\Support\Defer\DeferredCallbackCollection;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 
@@ -653,4 +657,113 @@ it('probes each file once across requests', function () {
     Media::fromDisk('videos')->open('video.mp4')->stream()->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts");
 
     Media::assertRanTimes(Executable::FFProbe, 2);
+});
+
+/**
+ * Name the faked disks in the config and use a queue that doesn't run jobs straight away.
+ */
+function lookAheadOnQueue(): void
+{
+    config([
+        'filesystems.disks.videos' => ['driver' => 'local', 'root' => sys_get_temp_dir()],
+        'filesystems.disks.segments' => ['driver' => 'local', 'root' => sys_get_temp_dir()],
+        'queue.default' => 'database',
+        'media.delivery.look_ahead' => 2,
+        'media.delivery.look_ahead_via' => 'queue',
+    ]);
+}
+
+it('queues the next segments that are not cached yet after a segment request', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    config(['media.delivery.look_ahead_connection' => 'redis', 'media.delivery.look_ahead_queue' => 'media']);
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 19)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+    $stream->lookAhead(0)->segment(0, 2, Track::Video);
+
+    $stream->lookAhead(2)->segmentResponse(0, 0, Track::Video);
+
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [1]
+        && $job->track === Track::Video
+        && $job->disk === 'videos'
+        && $job->path === 'video.mp4'
+        && $job->cacheDisk === 'segments'
+        && $job->segmentDuration === 6.0
+        && $job->connection === 'redis'
+        && $job->queue === 'media');
+});
+
+it('looks no further than the last segment and dispatches nothing when all are cached', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+
+    $stream->segmentResponse(0, 1);
+    $stream->lookAhead(0)->segment(0, 2);
+    $stream->lookAhead(2)->segmentResponse(0, 1);
+
+    Bus::assertDispatchedTimes(PackageSegments::class, 1);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [2] && $job->track === null);
+});
+
+it('packages ahead after the response on a sync queue', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    config(['queue.default' => 'sync']);
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+
+    $stream->segmentResponse(0, 0);
+
+    Bus::assertNotDispatched(PackageSegments::class);
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+
+    app(DeferredCallbackCollection::class)->invoke();
+
+    Media::assertRanTimes(Executable::FFMpeg, 3);
+});
+
+it('packages ahead after the response with the defer strategy', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(1, LookAheadStrategy::Defer)->segmentResponse(0, 0);
+    app(DeferredCallbackCollection::class)->invoke();
+
+    Bus::assertNotDispatched(PackageSegments::class);
+    Media::assertRanTimes(Executable::FFMpeg, 2);
+});
+
+it('does not look ahead when it is turned off', function (array $config) {
+    Bus::fake();
+    lookAheadOnQueue();
+    config($config);
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    Media::fromDisk('videos')->open('video.mp4')->stream()->segmentResponse(0, 0);
+    app(DeferredCallbackCollection::class)->invoke();
+
+    Bus::assertNotDispatched(PackageSegments::class);
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+})->with([
+    'no segments' => [['media.delivery.look_ahead' => 0]],
+    'no strategy' => [['media.delivery.look_ahead_via' => null]],
+]);
+
+it('queues the first segments of every dash track', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    Media::fake([
+        '1080.mp4' => FakeProbe::video(duration: 13, width: 1920, height: 1080),
+        '720.mp4' => FakeProbe::video(duration: 13, width: 1280, height: 720, audio: false),
+    ]);
+
+    Media::fromDisk('videos')->open(['1080.mp4', '720.mp4'])->stream()->packageStart();
+
+    Bus::assertDispatchedTimes(PackageSegments::class, 3);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Video && $job->segments === [0, 1]);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '720.mp4' && $job->track === Track::Video);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Audio);
 });
