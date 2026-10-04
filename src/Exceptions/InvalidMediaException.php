@@ -24,6 +24,11 @@ class InvalidMediaException extends RuntimeException
         ));
     }
 
+    public static function notStreamable(string $path, string $codec): self
+    {
+        return new self("{$path} can't be streamed as HLS with MPEG-TS segments without re-encoding: [{$codec}] isn't supported. Use H.264 or HEVC video with AAC, MP3 or AC-3 audio.");
+    }
+
     public static function noStreams(): self
     {
         return new self('Add at least one stream to package, e.g. with addStreamsFrom().');

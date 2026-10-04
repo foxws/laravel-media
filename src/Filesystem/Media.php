@@ -103,6 +103,20 @@ class Media
     }
 
     /**
+     * A key that changes when the file changes: its disk, path, size and modification time.
+     */
+    public function versionKey(): string
+    {
+        try {
+            $modified = $this->disk->lastModified($this->path);
+        } catch (Throwable) {
+            $modified = 0;
+        }
+
+        return hash('xxh128', implode('|', [$this->disk->name(), $this->path, $this->size(), $modified]));
+    }
+
+    /**
      * Delete the local copy of a remote file, if one was made.
      */
     public function cleanup(): void

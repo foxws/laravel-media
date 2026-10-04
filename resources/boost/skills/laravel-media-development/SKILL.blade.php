@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS straight from stored files (nginx-vod-module style), and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -78,6 +78,39 @@ $index->longestSegment(6);  // the HLS target duration
 - Indexes are cached on the opener and in `media.delivery.cache_store` (null for the default store) for `media.delivery.index_lifetime` seconds, keyed by disk, path, size and modification time, so a changed file is indexed again.
 - Audio-only files have no keyframes and are split into even segments.
 - `media.delivery.segment_duration` (`MEDIA_DELIVERY_SEGMENT_DURATION`, 6) is the default target length.
+
+## Streaming straight from stored files
+
+`stream()` serves the opened files as HLS without packaging them first, like nginx-vod-module: playlists come from the keyframe index, and each segment is copied into MPEG-TS the first time it's requested, then kept on a cache disk. Store each video once, as H.264/HEVC with AAC/MP3/AC-3. Every opened file is one variant, for example renditions of one video.
+
+@boostsnippet("Direct HLS controller", "php")
+public function master(Video $video): Response
+{
+    $playlist = $video->streamable()->stream()   // Media::fromDisk(...)->open(['1080.mp4', '720.mp4'])
+        ->masterPlaylist(fn (int $variant) => URL::temporarySignedRoute('videos.variant', now()->addHours(4), [$video, $variant]));
+
+    return response($playlist, 200, ['Content-Type' => 'application/vnd.apple.mpegurl']);
+}
+
+public function variant(Video $video, int $variant): Response
+{
+    $playlist = $video->streamable()->stream()
+        ->mediaPlaylist($variant, fn (Segment $segment, int $variant) => URL::temporarySignedRoute('videos.segment', now()->addHours(4), [$video, $variant, $segment->index]));
+
+    return response($playlist, 200, ['Content-Type' => 'application/vnd.apple.mpegurl']);
+}
+
+public function segment(Video $video, int $variant, int $segment): Response
+{
+    return $video->streamable()->stream()->segmentResponse($variant, $segment);   // packages it on the first request
+}
+@endboostsnippet
+
+- **Segments:** `ffmpeg -ss … -t … -copyts -c copy -f mpegts` copies each segment exactly, because segments start on keyframes. S3 sources are read through signed URLs with range requests, so only the needed bytes are fetched. Concurrent requests for the same segment package it once (`Cache::lock`).
+- **The segment cache:** `media.delivery.cache_disk` can be local storage, a mounted `/tmp` or RAM disk, or S3 (override per stream with `toCache()`). Segments are keyed by file version, so a changed file gets new segments. On disks with temporary URLs, `segmentResponse()` redirects to one valid for `media.delivery.url_lifetime` seconds; otherwise it returns the file with long cache headers.
+- **Errors:** out-of-range segments and variants throw `SegmentNotFoundException` (a 404). Files with codecs MPEG-TS can't carry (VP9, AV1, Opus, ...) throw `InvalidMediaException`.
+- **Players:** hls.js and Safari play these TS segments natively. Shaka Player needs mux.js loaded (`window.muxjs`) to transmux them.
+- `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
 
 ## Scenes, clips and reels
 
@@ -428,6 +461,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `packager.default` | Packager driver (`MEDIA_PACKAGER`, `shaka`) |
 | `executables.ffmpeg`, `.ffprobe`, `.packager`, `.ab-av1` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `delivery.segment_duration`, `.cache_store`, `.index_lifetime` | Segment length and keyframe index caching for streaming from stored files |
+| `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |

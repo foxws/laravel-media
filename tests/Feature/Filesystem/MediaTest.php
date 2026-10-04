@@ -67,3 +67,15 @@ it('fails when remote media does not exist', function () {
 
     $media->localPath();
 })->throws(MediaNotFoundException::class);
+
+it('has a version key that changes with the file', function () {
+    Storage::fake('videos')->put('video.mp4', 'one');
+    $media = new Media(Disk::make('videos'), 'video.mp4', app(TemporaryDirectories::class));
+    $first = $media->versionKey();
+
+    Storage::disk('videos')->put('video.mp4', 'version two');
+
+    expect($first)->toMatch('/^[0-9a-f]{32}$/')
+        ->and($media->versionKey())->not->toBe($first)
+        ->and(new Media(Disk::make('videos'), 'other.mp4', app(TemporaryDirectories::class))->versionKey())->not->toBe($first);
+});

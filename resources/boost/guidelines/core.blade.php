@@ -9,4 +9,4 @@ This application uses `foxws/laravel-media` to probe, process and package audio 
 - Catch `ProcessFailedException` in jobs and use `isRetryable()` to decide between `release()` and `fail()`; give long encodes a `->timeout()` below the job's `$timeout`.
 - In tests, call `Media::fake()` (with `FakeProbe` data when needed) and `Storage::fake()` for the disks, then use `Media::assertSaved()`/`assertRan()`; never run the real executables.
 
-When packaging into HLS or DASH, probing media, extracting frames, subtitles or thumbnail sprites, detecting scenes, building reels, encoding, clipping or exporting results to disks, invoke `laravel-media-development` for detailed rules.
+When streaming HLS straight from stored files, packaging into HLS or DASH, probing media, extracting frames, subtitles or thumbnail sprites, detecting scenes, building reels, encoding, clipping or exporting results to disks, invoke `laravel-media-development` for detailed rules.

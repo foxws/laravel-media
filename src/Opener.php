@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media;
 
+use Foxws\Media\Delivery\DirectStream;
 use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Delivery\KeyframeIndexer;
 use Foxws\Media\Exceptions\MediaNotFoundException;
@@ -155,6 +156,15 @@ class Opener
         $probe = $this->probe($media->path());
 
         return $this->keyframes[$media->path()] ??= KeyframeIndexer::make()->index($media, $probe->duration(), $probe->hasVideo());
+    }
+
+    /**
+     * Stream the opened files as HLS straight from where they're stored, packaging each segment
+     * when it's first requested. Every opened file is one variant, e.g. renditions of one video.
+     */
+    public function stream(): DirectStream
+    {
+        return app(DirectStream::class, ['opener' => $this]);
     }
 
     /**
