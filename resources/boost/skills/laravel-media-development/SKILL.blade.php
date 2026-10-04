@@ -219,6 +219,33 @@ $video->update([
 - `withKeyRotation($seconds)` uses a new key per period. Shaka derives the later keys from the first one, and only the first key is returned, so test full playback before relying on it.
 - Keys are redacted from commands, logs and events.
 
+### Shaka Packager options
+
+Options only Shaka Packager has (DRM key servers, live and low-latency DASH, base URLs, segment numbering) are typed and validated in `Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions`, so the generic builder stays driver-neutral:
+
+@boostsnippet("Shaka options", "php")
+use Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions;
+
+$media->package()->addStreamsFrom()->withDashManifest()
+    ->withOptions(ShakaOptions::make()
+        ->baseUrls('https://cdn.test/videos/1/')
+        ->lowLatencyDashMode()
+        ->timeShiftBufferDepth(60)
+        ->widevine('https://license.test/cenc/getcontentkey', contentId: 'abcd1234')
+        ->aesSigning('widevine_test', $signingKey, $signingIv)
+        ->protectionSystems(['Widevine', 'PlayReady']))
+    ->save('videos/1');
+@endboostsnippet
+
+- **HLS:** `hlsBaseUrl()`, `hlsMediaSequenceNumber()`, `hlsStartTimeOffset()`, `createSessionKeys()`.
+- **Live DASH:** `minBufferTime()`, `minimumUpdatePeriod()`, `suggestedPresentationDelay()`, `timeShiftBufferDepth()`, `preservedSegmentsOutsideLiveWindow()`, `utcTimings([...])`, `lowLatencyDashMode()`, `generateStaticLiveMpd()`.
+- **Segments:** `startSegmentNumber()`, `transportStreamTimestampOffset()`, `forceClIndex()`.
+- **Encryption:**
+  - `cryptByteBlock()`, `skipByteBlock()`, `vp9SubsampleEncryption()`, `protectionSystems()`, `pssh()`, `iv()`, `playreadyExtraHeaderData()`
+  - `widevine()`, `playready()`, `maxPixels()`, `groupId()`, `enableEntitlementLicense()`
+  - `aesSigning()` or `rsaSigning()` (one at a time), `keyServerTls()`, `decrypt()`
+- Signing keys, IVs, PSSH and certificate passwords are redacted from commands and logs. `withOptions([...])` also takes a plain array, and `withOption()` takes a single raw option.
+
 ## Several outputs in one run
 
 `addOutput($path, fn (Output $output) => ...)` writes another file from the same ffmpeg run. Each output has its own `map()`, `inFormat()`, `addFilter()` and `addArgs()`. The inputs are read and decoded once, which is much faster than one run per file.

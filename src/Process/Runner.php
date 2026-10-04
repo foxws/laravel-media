@@ -29,7 +29,7 @@ class Runner
      *
      * @var list<string>
      */
-    protected const array SENSITIVE_OPTIONS = ['keys', 'key', 'key_id', 'pssh', 'protection_systems', 'raw_key', 'iv', 'decryption_key'];
+    protected const array SENSITIVE_OPTIONS = ['keys', 'key', 'key_id', 'pssh', 'protection_systems', 'raw_key', 'iv', 'decryption_key', 'aes_signing_key', 'aes_signing_iv', 'client_cert_private_key_password'];
 
     /** @var array<int, \Illuminate\Contracts\Process\InvokedProcess> */
     protected array $running = [];

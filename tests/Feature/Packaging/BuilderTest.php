@@ -9,6 +9,7 @@ use Foxws\Media\Events\ExportFailed;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions;
 use Foxws\Media\Packaging\HlsPlaylistType;
 use Foxws\Media\Packaging\StreamType;
 use Illuminate\Support\Facades\Event;
@@ -155,4 +156,17 @@ it('keeps key rotation and clear lead in any order and generates a key for them'
 
     expect(Media::fromDisk('streams')->open('video.mp4')->package()->withKeyRotation(60)->encryptionKey())->toBeInstanceOf(EncryptionKey::class)
         ->and(Media::fromDisk('streams')->open('video.mp4')->package()->encryptionKey())->toBeNull();
+});
+
+it('passes typed shaka options to the packager and redacts signing keys', function () {
+    $packager = fakeExecutable(Executable::Packager);
+    Storage::fake('videos');
+
+    $command = Media::fromDisk('videos')->open('video.mp4')->package()->addVideoStream()->withDashManifest()
+        ->withOptions(ShakaOptions::make()->lowLatencyDashMode()->timeShiftBufferDepth(60)->aesSigning('signer', 'aabbccdd', '00112233'))
+        ->withOptions(['hls_base_url' => 'https://cdn.test/'])
+        ->command('out');
+
+    expect($command)->toBe("{$packager} in=video.mp4,stream=video,output=out/video_0.mp4 --mpd_output=out/manifest.mpd"
+        .' --low_latency_dash_mode --time_shift_buffer_depth=60 --signer=signer --aes_signing_key=[REDACTED] --aes_signing_iv=[REDACTED] --hls_base_url=https://cdn.test/');
 });

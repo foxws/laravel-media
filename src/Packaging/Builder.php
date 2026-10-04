@@ -18,6 +18,7 @@ use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Opener;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Traits\Conditionable;
 use Throwable;
@@ -261,6 +262,20 @@ class Builder
     public function withOption(string $key, string|int|float|bool|null $value = true): static
     {
         $this->options[$key] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Set several driver options at once, e.g. withOptions(ShakaOptions::make()->lowLatencyDashMode()).
+     *
+     * @param  array<string, string|int|float|bool|null>|Arrayable<string, string|int|float|bool|null>  $options
+     */
+    public function withOptions(array|Arrayable $options): static
+    {
+        foreach ($options instanceof Arrayable ? $options->toArray() : $options as $key => $value) {
+            $this->withOption($key, $value);
+        }
 
         return $this;
     }
