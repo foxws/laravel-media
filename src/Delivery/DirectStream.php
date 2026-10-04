@@ -935,7 +935,11 @@ class DirectStream
             unlink($output);
 
             file_put_contents($directory->path(basename($path)), $parts['media']);
-            file_put_contents($directory->path('init.mp4'), $parts['init']);
+
+            // Every fragment of a track carries the same initialization segment, so it's written once.
+            if (! $this->cacheDisk()->exists($this->initPath($media, $track))) {
+                file_put_contents($directory->path('init.mp4'), $parts['init']);
+            }
 
             $this->exporter->export($directory->path(), $this->cacheDisk(), dirname($path), move: true);
         } finally {

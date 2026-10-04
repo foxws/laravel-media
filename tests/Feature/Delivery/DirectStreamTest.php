@@ -293,6 +293,17 @@ it('copies one track of a segment into fragmented mp4 and caches its initializat
     ]);
 });
 
+it('keeps the cached initialization segment when packaging more fragments', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(0);
+    $init = dirname($stream->segment(0, 0, Track::Video)).'/init.mp4';
+    Storage::disk('segments')->put($init, 'cached');
+
+    $stream->segment(0, 1, Track::Video);
+
+    expect(Storage::disk('segments')->get($init))->toBe('cached');
+});
+
 it('packages the first segment for an initialization segment that is not cached yet', function () {
     Media::fake(['video.mp4' => FakeProbe::video(codec: 'hevc', duration: 13)]);
 
