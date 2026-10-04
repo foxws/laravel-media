@@ -1,0 +1,5 @@
+#EXTM3U
+#EXT-X-MAP:URI="0_audio.mp4"
+#EXTINF:6.000,
+segments/audio_1.m4s
+#EXT-X-ENDLIST

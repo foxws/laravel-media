@@ -27,7 +27,7 @@ use Throwable;
  * Packages already-encoded media into DASH and HLS. It doesn't transcode: encode
  * renditions first (e.g. with the ffmpeg builder), then package them here.
  */
-class Builder
+class PackagingBuilder
 {
     use Conditionable;
     use HasContext;

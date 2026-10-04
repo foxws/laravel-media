@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace Foxws\Media;
 
 use Foxws\Media\Exceptions\MediaNotFoundException;
-use Foxws\Media\FFMpeg\Builder;
+use Foxws\Media\FFMpeg\FFMpegBuilder;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\SceneDetector;
 use Foxws\Media\FFMpeg\Thumbnails;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
-use Foxws\Media\Packaging\Builder as PackagingBuilder;
+use Foxws\Media\Http\DynamicDASHManifest;
+use Foxws\Media\Http\DynamicHLSPlaylist;
+use Foxws\Media\Packaging\PackagingBuilder;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -133,9 +135,9 @@ class Opener
     /**
      * Build an ffmpeg command with the opened files as inputs.
      */
-    public function ffmpeg(): Builder
+    public function ffmpeg(): FFMpegBuilder
     {
-        return app(Builder::class, ['opener' => $this]);
+        return app(FFMpegBuilder::class, ['opener' => $this]);
     }
 
     /**
@@ -185,6 +187,22 @@ class Opener
     public function exportAsStreams(string $playlist = 'master.m3u8', string $manifest = 'manifest.mpd'): PackagingBuilder
     {
         return $this->package()->addStreamsFrom()->withHlsPlaylist($playlist)->withDashManifest($manifest)->forVod();
+    }
+
+    /**
+     * Rewrite the opened HLS playlist (the first opened path) per request, e.g. to sign its URIs.
+     */
+    public function hlsPlaylist(): DynamicHLSPlaylist
+    {
+        return new DynamicHLSPlaylist($this->disk)->open($this->mediaFor()->path());
+    }
+
+    /**
+     * Rewrite the opened DASH manifest (the first opened path) per request, e.g. to sign its URIs.
+     */
+    public function dashManifest(): DynamicDASHManifest
+    {
+        return new DynamicDASHManifest($this->disk)->open($this->mediaFor()->path());
     }
 
     /**

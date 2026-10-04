@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -245,6 +245,39 @@ $media->package()->addStreamsFrom()->withDashManifest()
   - `widevine()`, `playready()`, `maxPixels()`, `groupId()`, `enableEntitlementLicense()`
   - `aesSigning()` or `rsaSigning()` (one at a time), `keyServerTls()`, `decrypt()`
 - Signing keys, IVs, PSSH and certificate passwords are redacted from commands and logs. `withOptions([...])` also takes a plain array, and `withOption()` takes a single raw option.
+
+## Serving manifests with signed URLs
+
+Keep packaged segments on a private disk and rewrite the manifests per request, so every URI is a short-lived signed URL. Resolvers receive each file's path on the disk (for example `videos/1/0_video.mp4`), resolved relative to the manifest that references it.
+
+@boostsnippet("A manifest controller", "php")
+public function __invoke(Request $request, Video $video, string $path): Response
+{
+    Gate::authorize('view', $video);
+
+    $media = Media::fromDisk('streams')->open("videos/{$video->id}/{$path}");
+
+    $manifest = str_ends_with($path, '.m3u8')
+        ? $media->hlsPlaylist()
+            ->resolveKeyUrlsUsing(fn (string $key) => URL::temporarySignedRoute('videos.key', now()->addMinutes(10), [$video]))
+            ->resolvePlaylistUrlsUsing(fn (string $playlist) => URL::temporarySignedRoute('videos.manifest', now()->addHours(4), [$video, Str::after($playlist, "videos/{$video->id}/")]))
+            ->resolveMediaUrlsUsing(fn (string $file) => Storage::disk('streams')->temporaryUrl($file, now()->addHours(4)))
+        : $media->dashManifest()
+            ->resolveMediaUrlsUsing(fn (string $file) => Storage::disk('streams')->temporaryUrl($file, now()->addHours(4)));
+
+    return $manifest->toResponse($request);
+}
+@endboostsnippet
+
+- **`hlsPlaylist()`** rewrites:
+  - media playlists, including `#EXT-X-MEDIA` and I-frame playlists (`resolvePlaylistUrlsUsing`)
+  - segments and `#EXT-X-MAP` init segments (`resolveMediaUrlsUsing`)
+  - `#EXT-X-KEY`/`#EXT-X-SESSION-KEY` keys (`resolveKeyUrlsUsing`)
+
+  `all()` returns the master and every media playlist it references, keyed by disk path. `process($path)` rewrites one playlist.
+- **`dashManifest()`** rewrites `BaseURL`, `media` and `initialization`/`sourceURL` (`resolveInitUrlsUsing` falls back to the media resolver). Segment templates with `$Number$` are expanded into a segment list, because a template can't produce a different signed URL per segment. Query strings are escaped for XML.
+- Without a resolver, URIs stay as they are, and absolute URLs are never changed. Each path is resolved once per request.
+- Both are `Responsable` with the right content type, and also usable standalone: `new DynamicHLSPlaylist('streams')->open($path)`. Add cache headers yourself, and keep them shorter than the signed URLs' lifetime.
 
 ## Several outputs in one run
 

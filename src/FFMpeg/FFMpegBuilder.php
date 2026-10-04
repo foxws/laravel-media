@@ -41,7 +41,7 @@ use Throwable;
 /**
  * Builds and runs an ffmpeg command with the opened media as inputs.
  */
-class Builder
+class FFMpegBuilder
 {
     use Conditionable;
     use HasContext;
