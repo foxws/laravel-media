@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Delivery\Segment;
+use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\Executables\Executable;
@@ -128,3 +129,66 @@ it('refuses codecs mpeg-ts segments cannot carry', function () {
 
     Media::fromDisk('videos')->open('video.webm')->stream()->segment(0, 0);
 })->throws(InvalidMediaException::class, "video.webm can't be streamed as HLS with MPEG-TS segments without re-encoding: [vp9] isn't supported.");
+
+it('adds the key to the media playlist, changing it every rotation period', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $playlist = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->segmentDuration(4)
+        ->withEncryption(fn (int $period) => EncryptionKey::derive('secret', "video:1:{$period}"), fn (int $period, int $variant) => "https://app.test/keys/{$variant}/{$period}", rotateEvery: 2)
+        ->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts");
+
+    expect(array_values(array_filter(explode("\n", $playlist), fn (string $line) => str_starts_with($line, '#EXT-X-KEY') || str_ends_with($line, '.ts'))))->toBe([
+        '#EXT-X-KEY:METHOD=AES-128,URI="https://app.test/keys/0/0"',
+        '0.ts',
+        '1.ts',
+        '#EXT-X-KEY:METHOD=AES-128,URI="https://app.test/keys/0/1"',
+        '2.ts',
+        '3.ts',
+    ]);
+});
+
+it('encrypts each segment response with its period key and the sequence number as iv', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->withEncryption(fn (int $period) => EncryptionKey::derive('secret', "video:{$period}"), fn (int $period) => "key/{$period}", rotateEvery: 2);
+    $plain = Storage::disk('segments')->get($stream->segment(0, 2));
+
+    $response = $stream->segmentResponse(0, 2);
+
+    $iv = str_pad(pack('J', 2), 16, "\0", STR_PAD_LEFT);
+    expect(openssl_decrypt((string) $response->getContent(), 'aes-128-cbc', EncryptionKey::derive('secret', 'video:1')->binary(), OPENSSL_RAW_DATA, $iv))->toBe($plain)
+        ->and($response->headers->get('Cache-Control'))->toContain('private');
+});
+
+it('serves encrypted segments itself instead of redirecting to the cache disk', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $remote = remoteDisk(Storage::fake('remote-segments')->path(''));
+
+    $response = Media::fromDisk('videos')->open('video.mp4')->stream()->toCache($remote)
+        ->withEncryption(EncryptionKey::generate(), fn () => 'key')
+        ->segmentResponse(0, 0);
+
+    expect($response)->not->toBeInstanceOf(RedirectResponse::class)
+        ->and($response->headers->get('Content-Type'))->toBe('video/mp2t');
+});
+
+it('serves the raw key of a period', function () {
+    Media::fake();
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()
+        ->withEncryption(fn (int $period) => EncryptionKey::derive('secret', "video:{$period}"), fn () => 'key');
+
+    $response = $stream->keyResponse(3);
+
+    expect($response->getContent())->toBe(EncryptionKey::derive('secret', 'video:3')->binary())
+        ->and($response->headers->get('Content-Type'))->toBe('application/octet-stream')
+        ->and($response->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('needs encryption to serve keys and a positive rotation', function () {
+    Media::fake();
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+
+    expect(fn () => $stream->keyResponse())->toThrow(InvalidArgumentException::class, 'not encrypted')
+        ->and(fn () => $stream->withEncryption(EncryptionKey::generate(), fn () => 'key', rotateEvery: 0))->toThrow(InvalidArgumentException::class, 'at least one segment');
+});
