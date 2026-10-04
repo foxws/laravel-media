@@ -24,6 +24,7 @@ use Foxws\Media\Filters\Filter;
 use Foxws\Media\Filters\FilterType;
 use Foxws\Media\Filters\Number;
 use Foxws\Media\Filters\Position;
+use Foxws\Media\Filters\Tonemap;
 use Foxws\Media\Opener;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -59,6 +60,8 @@ class Builder
 
     /** @var list<Output> */
     protected array $outputs = [];
+
+    protected ?Tonemap $toneMap = null;
 
     protected ?Reel $reel = null;
 
@@ -160,6 +163,17 @@ class Builder
     public function addFilter(Filter ...$filters): static
     {
         $this->filters = [...$this->filters, ...array_values($filters)];
+
+        return $this;
+    }
+
+    /**
+     * Convert HDR video to SDR when the source is HDR, before any other video filter.
+     * SDR sources are left alone, so it's safe to always call for files of unknown origin.
+     */
+    public function toneMap(?Tonemap $toneMap = null): static
+    {
+        $this->toneMap = $toneMap ?? new Tonemap;
 
         return $this;
     }
@@ -314,11 +328,13 @@ class Builder
         if ($reel !== null) {
             $this->ensureReelIsAlone();
 
-            return $reel->arguments($this->filters);
+            return $reel->arguments($this->filters, $this->toneMap);
         }
 
+        $filters = $this->sourceFilters();
+
         if ($this->watermark === null) {
-            return [...$this->maps, ...FilterChain::arguments($this->filters)];
+            return [...$this->maps, ...FilterChain::arguments($filters)];
         }
 
         if ($this->maps !== []) {
@@ -329,8 +345,8 @@ class Builder
             throw InvalidFilterException::watermarkWithOutputs();
         }
 
-        $video = FilterChain::of($this->filters, FilterType::Video);
-        $audio = FilterChain::of($this->filters, FilterType::Audio);
+        $video = FilterChain::of($filters, FilterType::Video);
+        $audio = FilterChain::of($filters, FilterType::Audio);
 
         $watermarkInput = $this->concat ? 1 : count($this->opener->media());
 
@@ -407,6 +423,20 @@ class Builder
         $this->runAfterSavingCallbacks($result);
 
         return $result;
+    }
+
+    /**
+     * The filters for the main output, starting with the tone map when the (first) source is HDR.
+     *
+     * @return list<Filter>
+     */
+    protected function sourceFilters(): array
+    {
+        if ($this->toneMap === null || $this->opener->probe()->videoStream()?->isHdr() !== true) {
+            return $this->filters;
+        }
+
+        return [$this->toneMap, ...$this->filters];
     }
 
     /**

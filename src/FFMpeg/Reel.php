@@ -9,6 +9,7 @@ use Foxws\Media\Filters\FilterType;
 use Foxws\Media\Filters\Fps;
 use Foxws\Media\Filters\Number;
 use Foxws\Media\Filters\Scale;
+use Foxws\Media\Filters\Tonemap;
 use Foxws\Media\Opener;
 
 /**
@@ -47,11 +48,12 @@ final readonly class Reel
 
     /**
      * The filter graph and maps, with the given filters applied to the joined result.
+     * With a tone map, clips from HDR files are converted to SDR before they're joined.
      *
      * @param  list<Filter>  $filters
      * @return list<string>
      */
-    public function arguments(array $filters): array
+    public function arguments(array $filters, ?Tonemap $toneMap = null): array
     {
         $withAudio = $this->hasAudio();
         $normalize = $this->normalizeFilter();
@@ -60,7 +62,9 @@ final readonly class Reel
         $joined = '';
 
         foreach ($this->clips as $index => $clip) {
-            $graph[] = "[{$index}:v:0]setpts=PTS-STARTPTS{$normalize}[v{$index}]";
+            $hdr = $toneMap !== null && $this->opener->probe($this->opener->mediaFor($clip->path)->path())->videoStream()?->isHdr() === true;
+
+            $graph[] = "[{$index}:v:0]setpts=PTS-STARTPTS".($hdr ? ",{$toneMap}" : '')."{$normalize}[v{$index}]";
 
             if ($withAudio) {
                 $graph[] = "[{$index}:a:0]asetpts=PTS-STARTPTS[a{$index}]";
