@@ -33,6 +33,17 @@ it('deletes segments packaged more than a week ago and their empty directories',
     expect(Storage::disk('segments')->directories('media-segments'))->toBe(['media-segments/bbbb']);
 });
 
+it('deletes fragmented segments and their initialization segments too', function () {
+    $fragment = cachedSegment('media-segments/aaaa/6/video/0.m4s', minutes: 10081);
+    $init = cachedSegment('media-segments/aaaa/6/video/init.mp4', minutes: 10081);
+
+    $this->artisan('media:prune')
+        ->expectsOutputToContain('Deleted 2 cached segments older than 10080 minutes.')
+        ->assertSuccessful();
+
+    Storage::disk('segments')->assertMissing([$fragment, $init]);
+});
+
 it('only touches segments in the cache path', function () {
     $other = cachedSegment('other/0.ts', minutes: 99999);
     $notSegment = cachedSegment('media-segments/notes.txt', minutes: 99999);

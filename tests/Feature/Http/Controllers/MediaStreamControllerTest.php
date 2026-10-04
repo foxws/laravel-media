@@ -73,3 +73,34 @@ it('only serves signed streams with a valid signature and signs every url', func
     $this->get($segmentUrl)->assertOk();
     $this->get(strtok($segmentUrl, '?'))->assertForbidden();
 });
+
+it('serves fragmented streams with track playlists, initialization segments and fragments', function () {
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()->fragmented());
+
+    $this->get('videos/1/master.m3u8')
+        ->assertSee(['URI="http://localhost/videos/1/0/audio/index.m3u8"', 'http://localhost/videos/1/0/video/index.m3u8'], escape: false);
+
+    $this->get('videos/1/0/video/index.m3u8')
+        ->assertOk()
+        ->assertSee(['#EXT-X-MAP:URI="http://localhost/videos/1/0/video/init.mp4"', 'http://localhost/videos/1/0/video/2.m4s'], escape: false);
+
+    $this->get('videos/1/0/audio/1.m4s')->assertOk()->assertHeader('Content-Type', 'audio/mp4');
+    $this->get('videos/1/0/video/init.mp4')->assertOk()->assertHeader('Content-Type', 'video/mp4');
+    $this->get('videos/1/0/subtitles/init.mp4')->assertNotFound();
+});
+
+it('serves a dash manifest with signed segment urls', function () {
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"))->signed();
+
+    $response = $this->get(MediaStream::dashUrl('videos', ['video' => 1]))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/dash+xml');
+
+    $manifest = simplexml_load_string((string) $response->getContent());
+    $segmentUrl = (string) $manifest->Period->AdaptationSet[0]->Representation->SegmentList->SegmentURL[1]['media'];
+    $initUrl = (string) $manifest->Period->AdaptationSet[1]->Representation->SegmentList->Initialization['sourceURL'];
+
+    expect($segmentUrl)->toStartWith('http://localhost/videos/1/0/video/1.m4s?expires=');
+    $this->get($segmentUrl)->assertOk();
+    $this->get($initUrl)->assertOk()->assertHeader('Content-Type', 'audio/mp4');
+});

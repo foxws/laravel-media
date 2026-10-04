@@ -39,3 +39,10 @@ it('needs routes to build urls', function () {
 
     MediaStream::url('videos');
 })->throws(InvalidArgumentException::class, 'Media stream [videos] has no route.');
+
+it('builds the url of the dash manifest', function () {
+    MediaStream::define('videos', fn (string $video) => Media::open("{$video}.mp4"));
+    Route::mediaStream('videos/{video}', 'videos');
+
+    expect(MediaStream::dashUrl('videos', ['video' => 1]))->toBe('http://localhost/videos/1/manifest.mpd');
+});
