@@ -142,7 +142,7 @@ MediaStream::url('videos', ['video' => $video]);       // master.m3u8, fragmente
 - **Tracks:** fragmented segments hold one track (`Track::Video` or `Track::Audio`), as CMAF and DASH expect. Every file with video is a video representation, and the audio of the first file with audio is shared by all of them (HLS `#EXT-X-MEDIA` audio rendition, DASH audio adaptation set).
 - **HLS:** `fragmented()` switches HLS to version 7 playlists with `#EXT-X-MAP` initialization segments. Without it, HLS keeps MPEG-TS; the DASH manifest and its segments work either way, and both formats share the cached fragments.
 - **Players:** Shaka Player, hls.js, dash.js and Safari play fragmented MP4 natively, without mux.js.
-- **Codecs:** fragmented MP4 also carries AV1, VP9, Opus and FLAC. HEVC is tagged `hvc1` for Safari.
+- **Codecs:** fragmented MP4 also carries AV1, VP9, Opus and FLAC. HEVC is tagged `hvc1` for Safari. AV1 gets its `av01` codec string from the probed profile, level and pixel format; VP9 has none, so players probe it themselves.
 - **DASH manifests** are static, with a `SegmentList` and millisecond `SegmentTimeline` per representation, so every segment URL can be signed. Fragments keep their source timestamps plus a fixed 10-second offset, which `presentationTimeOffset` removes again.
 - **Without routes:** `dashManifest($initUrl, $segmentUrl)`, `mediaPlaylist($variant, $segmentUrl, Track::Video, $initUrl)`, `initSegmentResponse($variant, $track)` and `segmentResponse($variant, $index, $track)`.
 - Per-request AES-128 only works with MPEG-TS; fragmented and DASH output of an encrypted stream throws. Use `exportAsDASH()` with encryption for protected DASH.

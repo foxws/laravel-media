@@ -40,3 +40,11 @@ it('joins codecs unless one of them is unknown', function () {
         ->and(Codecs::join(['avc1.640028', null]))->toBeNull()
         ->and(Codecs::join([]))->toBeNull();
 });
+
+it('describes av1 profiles, levels and bit depths', function () {
+    expect(codecsFor(['codec_name' => 'av1', 'profile' => 'Main', 'level' => 8, 'pix_fmt' => 'yuv420p']))->toBe('av01.0.08M.08')
+        ->and(codecsFor(['codec_name' => 'av1', 'profile' => 'Main', 'level' => 13, 'pix_fmt' => 'yuv420p10le']))->toBe('av01.0.13M.10')
+        ->and(codecsFor(['codec_name' => 'av1', 'profile' => 'High', 'level' => 9, 'pix_fmt' => 'yuv444p']))->toBe('av01.1.09M.08')
+        ->and(codecsFor(['codec_name' => 'av1', 'profile' => 'Main', 'level' => -99]))->toBeNull()
+        ->and(codecsFor(['codec_name' => 'av1']))->toBeNull();
+});
