@@ -244,6 +244,36 @@ it('lists video tracks with a shared audio rendition when fragmented', function 
     ]));
 });
 
+it('lists an i-frame playlist per video variant with trick play', function () {
+    Media::fake([
+        '1080.mp4' => FakeProbe::video(width: 1920, height: 1080),
+        '720.mp4' => FakeProbe::video(width: 1280, height: 720),
+    ]);
+    $stream = Media::fromDisk('videos')->open(['1080.mp4', '720.mp4'])->stream()->withTrickPlay();
+
+    expect($stream->fragmented()->masterPlaylist(fn (int $variant, ?Track $track) => "{$variant}/{$track?->value}.m3u8"))->toEndWith(implode("\n", [
+        '1/video.m3u8',
+        '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=495000,RESOLUTION=1920x1080,CODECS="avc1.640028",URI="0/iframes.m3u8"',
+        '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=495000,RESOLUTION=1280x720,CODECS="avc1.640028",URI="1/iframes.m3u8"',
+        '',
+    ]))
+        ->and($stream->fragmented(false)->masterPlaylist(fn (int $variant) => "{$variant}.m3u8"))->not->toContain('I-FRAME');
+});
+
+it('marks the media playlist of the i-frames track as i-frames only', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $playlist = Media::fromDisk('videos')->open('video.mp4')->stream()->fragmented()->mediaPlaylist(
+        0,
+        fn (Segment $segment, int $variant, ?Track $track) => "{$variant}/{$track?->value}/{$segment->index}.m4s",
+        Track::IFrames,
+        fn (int $variant, Track $track) => "{$variant}/{$track->value}/init.mp4",
+    );
+
+    expect($playlist)->toContain("#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-I-FRAMES-ONLY\n#EXT-X-MAP:URI=\"0/iframes/init.mp4\"\n#EXTINF:6.000000,\n0/iframes/0.m4s")
+        ->not->toContain('#EXT-X-INDEPENDENT-SEGMENTS');
+});
+
 it('lists the audio track as the variant of fragmented audio', function () {
     Media::fake(['song.m4a' => FakeProbe::audio()]);
 
@@ -293,6 +323,14 @@ it('copies one track of a segment into fragmented mp4 and caches its initializat
         '-output_ts_offset', '10', '-avoid_negative_ts', 'disabled', '-use_editlist', '0',
         '-movflags', '+frag_keyframe+empty_moov+default_base_moof+frag_discont', '-fflags', '+bitexact', '-f', 'mp4',
     ]);
+});
+
+it('copies only the first keyframe of a segment into the i-frames track', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+
+    expect($stream->segment(0, 1, Track::IFrames))->toMatch('#^media-segments/[0-9a-f]{32}/6/iframes/1\.m4s$#');
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 12, 6) === ['-map', '0:v:0', '-frames:v', '1', '-c', 'copy']);
 });
 
 it('keeps the cached initialization segment when packaging more fragments', function () {
@@ -406,6 +444,23 @@ function cacheFragmentedTrack(DirectStream $stream, int $segment, Track $track, 
 
     return $fragments;
 }
+
+it('adds a trick mode adaptation set of the i-frames to the dash manifest', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $manifest = Media::fromDisk('videos')->open('video.mp4')->stream()->withTrickPlay()->dashManifest(
+        fn (int $variant, Track $track) => "{$variant}/{$track->value}/init.mp4",
+        fn (Segment $segment, int $variant, Track $track) => "{$variant}/{$track->value}/{$segment->index}.m4s",
+    );
+
+    expect($manifest)->toContain(implode("\n", [
+        '    <AdaptationSet id="2" contentType="video" mimeType="video/mp4" startWithSAP="1">',
+        '      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="0"/>',
+        '      <Representation id="iframes-0" codecs="avc1.640028" bandwidth="495000" width="1920" height="1080" maxPlayoutRate="6" codingDependency="false">',
+    ]))
+        ->toContain('<Initialization sourceURL="0/iframes/init.mp4"/>')
+        ->toContain('<SegmentURL media="0/iframes/2.m4s"/>');
+});
 
 it('encrypts fragmented streams with one key only', function () {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);

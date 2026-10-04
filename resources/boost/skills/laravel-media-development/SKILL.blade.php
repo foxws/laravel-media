@@ -148,6 +148,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **DASH manifests** are static, with a `SegmentList` and millisecond `SegmentTimeline` per representation, so every segment URL can be signed. Fragments keep their source timestamps plus a fixed 10-second offset, which `presentationTimeOffset` removes again.
 - **Without routes:** `dashManifest($initUrl, $segmentUrl)`, `mediaPlaylist($variant, $segmentUrl, Track::Video, $initUrl)`, `initSegmentResponse($variant, $track)` and `segmentResponse($variant, $index, $track)`.
 - Encrypted streams use Common Encryption in fragmented MP4 and DASH; see below.
+- **Trick play:** `->withTrickPlay()` adds an `#EXT-X-I-FRAME-STREAM-INF` I-frame playlist per video variant to the CMAF master playlist (`#EXT-X-I-FRAMES-ONLY`), and a trick mode adaptation set (`http://dashif.org/guidelines/trickmode`, `codingDependency="false"`) to the DASH manifest, so players like Shaka Player show frames while fast-forwarding. Its segments are `Track::IFrames`: only the keyframe each video segment starts with (`-frames:v 1`), at `{variant}/iframes/...`, cached and encrypted like other tracks. There's one I-frame per segment, so shorter segments give smoother trick play; the bandwidth is estimated as a tenth of the variant's. MPEG-TS playlists (`hlsUrl()`) don't list I-frames.
 
 ### Subtitles
 

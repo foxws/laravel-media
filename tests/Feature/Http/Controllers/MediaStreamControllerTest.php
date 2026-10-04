@@ -115,6 +115,15 @@ it('serves cmaf streams with track playlists, initialization segments and fragme
     $this->get('videos/1/0/subtitles/init.mp4')->assertNotFound();
 });
 
+it('serves the i-frames track of cmaf streams with trick play', function () {
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()->withTrickPlay());
+
+    $this->get('videos/1/cmaf.m3u8')->assertSee('URI="http://localhost/videos/1/0/iframes/index.m3u8"', escape: false);
+    $this->get('videos/1/0/iframes/index.m3u8')->assertOk()->assertSee(['#EXT-X-I-FRAMES-ONLY', 'http://localhost/videos/1/0/iframes/2.m4s']);
+    $this->get('videos/1/0/iframes/1.m4s')->assertOk()->assertHeader('Content-Type', 'video/mp4');
+    $this->get('videos/1/dash.mpd')->assertSee('http://localhost/videos/1/0/iframes/init.mp4');
+});
+
 it('serves a dash manifest with signed segment urls', function () {
     MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"))->signed();
 

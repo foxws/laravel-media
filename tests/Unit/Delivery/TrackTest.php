@@ -10,3 +10,11 @@ it('maps the first stream of its type with its content type', function () {
         ->and(Track::Video->contentType())->toBe('video/mp4')
         ->and(Track::Audio->contentType())->toBe('audio/mp4');
 });
+
+it('takes i-frames from the first video stream', function () {
+    expect(Track::IFrames->map())->toBe('0:v:0')
+        ->and(Track::IFrames->contentType())->toBe('video/mp4')
+        ->and(Track::IFrames->isVideo())->toBeTrue()
+        ->and(Track::Video->isVideo())->toBeTrue()
+        ->and(Track::Audio->isVideo())->toBeFalse();
+});
