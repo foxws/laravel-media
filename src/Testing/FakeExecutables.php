@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Testing;
 
+use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 
@@ -12,12 +13,12 @@ use Foxws\Media\Executables\Executables;
  */
 class FakeExecutables extends Executables
 {
-    public function path(Executable $executable): string
+    public function path(Binary $executable): string
     {
-        return $executable->value;
+        return $executable->identifier();
     }
 
-    public function available(Executable $executable): bool
+    public function available(Binary $executable): bool
     {
         return true;
     }

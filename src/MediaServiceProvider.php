@@ -8,7 +8,6 @@ use Foxws\Media\Commands\CleanCommand;
 use Foxws\Media\Commands\InfoCommand;
 use Foxws\Media\Commands\PruneCommand;
 use Foxws\Media\Delivery\StreamRegistry;
-use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
@@ -108,8 +107,8 @@ class MediaServiceProvider extends ServiceProvider
             'Timeout' => Config::integer('media.timeout', 14400).'s',
         ];
 
-        foreach (Executable::cases() as $executable) {
-            $section[ucfirst($executable->value)] = $executables->available($executable)
+        foreach ($executables->all() as $executable) {
+            $section[ucfirst($executable->identifier())] = $executables->available($executable)
                 ? $executables->path($executable)
                 : 'not found';
         }

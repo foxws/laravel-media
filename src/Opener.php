@@ -23,12 +23,16 @@ use Foxws\Media\Probe\Prober;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Traits\Macroable;
 
 /**
- * One or more opened media files on a disk.
+ * One or more opened media files on a disk. Packages add their own tools with macros, e.g.
+ * Opener::macro('abAv1', fn () => new AbAv1Builder($this)).
  */
 class Opener
 {
+    use Macroable;
+
     /** @var array<string, Media> */
     protected array $media = [];
 

@@ -7,6 +7,7 @@ namespace Foxws\Media\Process;
 use Foxws\Media\Concerns\ResolvesFromContainer;
 use Foxws\Media\Exceptions\ProcessCancelledException;
 use Foxws\Media\Exceptions\ProcessFailedException;
+use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;
@@ -55,10 +56,11 @@ class Runner
      *
      * @param  list<string>  $arguments
      * @param  (callable(string): mixed)|null  $onOutput
+     * @param  array<string, string>  $environment  Extra environment variables for the process.
      *
      * @throws ProcessFailedException
      */
-    public function run(Executable $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null): Result
+    public function run(Binary $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null, array $environment = []): Result
     {
         $command = [$this->executables->path($executable), ...$arguments];
 
@@ -66,14 +68,14 @@ class Runner
 
         Event::dispatch(new ProcessStarted($executable, $redacted));
 
-        $this->logger?->debug("Running {$executable->value}", ['command' => $redacted]);
+        $this->logger?->debug("Running {$executable->identifier()}", ['command' => $redacted]);
 
         $startedAt = hrtime(true);
 
         $timeout ??= $this->timeout;
 
         try {
-            [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $onOutput);
+            [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $onOutput, $environment);
         } catch (ProcessCancelledException) {
             $this->fail(ProcessFailedException::cancelled(
                 new Result($executable, $redacted, 130, '', '', (hrtime(true) - $startedAt) / 1e9),
@@ -99,7 +101,7 @@ class Runner
         }
 
         if (trim($result->errorOutput) !== '') {
-            $this->logger?->warning("{$executable->value} reported warnings", [
+            $this->logger?->warning("{$executable->identifier()} reported warnings", [
                 'command' => $redacted,
                 'warnings' => trim($result->errorOutput),
             ]);
@@ -129,16 +131,17 @@ class Runner
      *
      * @param  list<string>  $command
      * @param  (callable(string): mixed)|null  $onOutput
+     * @param  array<string, string>  $environment
      * @return array{int, string, string}
      */
-    protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
+    protected function execute(Binary $executable, array $command, int $timeout, ?callable $onOutput, array $environment = []): array
     {
         $id = ++$this->runs;
         $this->streaming[$id] = true;
 
         // The callback goes to start(), because Symfony already reads available
         // output when starting, which a callback passed to wait() would miss.
-        $process = Process::timeout($timeout)->start($command, function (string $type, string $output) use ($onOutput, $id): void {
+        $process = Process::timeout($timeout)->env($environment)->start($command, function (string $type, string $output) use ($onOutput, $id): void {
             if ($type === 'out' && $onOutput !== null && isset($this->streaming[$id])) {
                 $onOutput($output);
             }
@@ -193,7 +196,7 @@ class Runner
      *
      * @param  list<string>  $arguments
      */
-    public function commandLine(Executable $executable, array $arguments): string
+    public function commandLine(Binary $executable, array $arguments): string
     {
         return $this->redact([$this->executables->path($executable), ...$arguments]);
     }

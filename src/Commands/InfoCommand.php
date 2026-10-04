@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Commands;
 
-use Foxws\Media\Executables\Executable;
+use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executables;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Process;
@@ -19,22 +19,22 @@ class InfoCommand extends Command
 
     public function handle(Executables $executables): int
     {
-        $rows = array_map(function (Executable $executable) use ($executables): array {
+        $rows = array_map(function (Binary $executable) use ($executables): array {
             if (! $executables->available($executable)) {
-                return [$executable->value, '<fg=red>missing</>', "set {$executable->environmentKey()}", ''];
+                return [$executable->identifier(), '<fg=red>missing</>', "set {$executable->environmentKey()}", ''];
             }
 
             $path = $executables->path($executable);
 
-            return [$executable->value, '<fg=green>found</>', $path, $this->version($path, $executable)];
-        }, Executable::cases());
+            return [$executable->identifier(), '<fg=green>found</>', $path, $this->version($path, $executable)];
+        }, $executables->all());
 
         $this->table(['Executable', 'Status', 'Path', 'Version'], $rows);
 
         return self::SUCCESS;
     }
 
-    protected function version(string $path, Executable $executable): string
+    protected function version(string $path, Binary $executable): string
     {
         $result = Process::timeout(10)->run([$path, ...$executable->versionArguments()]);
 

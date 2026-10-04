@@ -34,7 +34,6 @@ return [
         'ffmpeg' => env('MEDIA_FFMPEG_PATH', 'ffmpeg'),
         'ffprobe' => env('MEDIA_FFPROBE_PATH', 'ffprobe'),
         'packager' => env('MEDIA_PACKAGER_PATH', 'packager'),
-        'ab-av1' => env('MEDIA_AB_AV1_PATH', 'ab-av1'),
     ],
 
     /*

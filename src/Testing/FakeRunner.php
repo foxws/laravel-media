@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Testing;
 
+use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Runner;
@@ -23,7 +24,7 @@ class FakeRunner extends Runner
         parent::__construct($executables);
     }
 
-    protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
+    protected function execute(Binary $executable, array $command, int $timeout, ?callable $onOutput, array $environment = []): array
     {
         $arguments = array_slice($command, 1);
 
@@ -39,7 +40,7 @@ class FakeRunner extends Runner
                 : (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
             Executable::FFMpeg => [0, $this->ffmpeg($arguments, $onOutput), ''],
             Executable::Packager => [0, $this->packager($arguments), ''],
-            default => [0, '', ''],
+            default => [0, $this->fake->responseFor($executable, $arguments), ''],
         };
     }
 
