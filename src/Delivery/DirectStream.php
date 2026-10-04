@@ -77,6 +77,9 @@ class DirectStream
 
     protected ?LookAheadStrategy $lookAheadStrategy = null;
 
+    /** @var array{video: list<int>, audio: int|null}|null */
+    protected ?array $tracks = null;
+
     public function __construct(
         protected Opener $opener,
         protected Runner $runner,
@@ -125,6 +128,19 @@ class DirectStream
     public function fragmented(bool $fragmented = true): static
     {
         $this->fragmented = $fragmented;
+
+        return $this;
+    }
+
+    /**
+     * Pick which variants give the video tracks of fragmented streams and which one gives the shared
+     * audio track, instead of every variant with video and the first one with audio.
+     *
+     * @param  list<int>  $videoVariants
+     */
+    public function tracksFrom(array $videoVariants, ?int $audioVariant): static
+    {
+        $this->tracks = ['video' => $videoVariants, 'audio' => $audioVariant];
 
         return $this;
     }
@@ -252,20 +268,30 @@ class DirectStream
      */
     public function subtitleResponse(int $subtitle, ?float $timestampOffset = null): Response
     {
-        $content = $this->subtitle($subtitle);
-
-        if ($timestampOffset !== null) {
-            $map = 'X-TIMESTAMP-MAP=MPEGTS:'.(int) round($timestampOffset * 90000).',LOCAL:00:00:00.000';
-            $content = (string) preg_replace('/^X-TIMESTAMP-MAP=.*\R/m', '', $content);
-            $content = str_starts_with(ltrim($content, "\u{FEFF}"), 'WEBVTT')
-                ? (string) preg_replace('/^\x{FEFF}?(WEBVTT[^\r\n]*)/u', "\$1\n{$map}", $content, 1)
-                : "WEBVTT\n{$map}\n\n{$content}";
-        }
-
-        return new Response($content, 200, [
+        return new Response($this->subtitleContents($subtitle, $timestampOffset), 200, [
             'Content-Type' => 'text/vtt; charset=utf-8',
             'Cache-Control' => 'public, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
         ]);
+    }
+
+    /**
+     * The WebVTT content of a subtitle track, mapped onto segment timestamps when an offset is given,
+     * as subtitleResponse() serves it.
+     */
+    public function subtitleContents(int $subtitle, ?float $timestampOffset = null): string
+    {
+        $content = $this->subtitle($subtitle);
+
+        if ($timestampOffset === null) {
+            return $content;
+        }
+
+        $map = 'X-TIMESTAMP-MAP=MPEGTS:'.(int) round($timestampOffset * 90000).',LOCAL:00:00:00.000';
+        $content = (string) preg_replace('/^X-TIMESTAMP-MAP=.*\R/m', '', $content);
+
+        return str_starts_with(ltrim($content, "\u{FEFF}"), 'WEBVTT')
+            ? (string) preg_replace('/^\x{FEFF}?(WEBVTT[^\r\n]*)/u', "\$1\n{$map}", $content, 1)
+            : "WEBVTT\n{$map}\n\n{$content}";
     }
 
     /**
@@ -613,10 +639,6 @@ class DirectStream
     {
         $this->ensureOneKey();
 
-        if ($this->keys !== null && $this->licenseUrl === null) {
-            throw new InvalidArgumentException('Encrypted DASH streams need a license URL. Pass one to licenseUrlUsing().');
-        }
-
         if ($this->subtitles() !== [] && $subtitleUrl === null) {
             throw new InvalidArgumentException('Streams with subtitles need the URLs of their WebVTT files.');
         }
@@ -750,18 +772,37 @@ class DirectStream
      */
     public function initSegmentResponse(int $variant, Track $track): Response
     {
+        if ($this->keys !== null) {
+            $content = $this->initSegmentContents($variant, $track);
+
+            $this->packageAhead($variant, 1, $track);
+
+            return $this->encryptedResponse($content, $track->contentType());
+        }
+
         $path = $this->initSegment($variant, $track);
 
         $this->packageAhead($variant, 1, $track);
 
+        return $this->fileResponse($path, $track->contentType());
+    }
+
+    /**
+     * The bytes of a track's initialization segment, marked as encrypted when the stream is.
+     *
+     * @throws SegmentNotFoundException
+     * @throws InvalidMediaException
+     */
+    public function initSegmentContents(int $variant, Track $track): string
+    {
         if ($this->keys !== null) {
             $this->ensureOneKey();
             $this->ensureEncryptable($variant, $track);
-
-            return $this->encryptedResponse(CommonEncryption::init((string) $this->cacheDisk()->get($path), $this->key()), $track->contentType());
         }
 
-        return $this->fileResponse($path, $track->contentType());
+        $content = $this->cachedInitSegment($variant, $track);
+
+        return $this->keys !== null ? CommonEncryption::init($content, $this->key()) : $content;
     }
 
     /**
@@ -774,37 +815,55 @@ class DirectStream
      */
     public function segmentResponse(int $variant, int $index, ?Track $track = null): Response
     {
-        if ($track !== null) {
-            if ($this->keys !== null) {
-                $this->ensureOneKey();
-                $this->ensureEncryptable($variant, $track);
-            }
+        $contentType = $track?->contentType() ?? 'video/mp2t';
 
-            $path = $this->segment($variant, $index, $track);
+        if ($this->keys !== null) {
+            $content = $this->segmentContents($variant, $index, $track);
 
             $this->packageAhead($variant, $index + 1, $track);
 
-            if ($this->keys !== null) {
-                $init = (string) $this->cacheDisk()->get($this->initSegment($variant, $track));
-
-                return $this->encryptedResponse(
-                    CommonEncryption::segment($init, (string) $this->cacheDisk()->get($path), $this->key(), "{$variant}|{$track->value}|{$index}"),
-                    $track->contentType(),
-                );
-            }
-
-            return $this->fileResponse($path, $track->contentType());
+            return $this->encryptedResponse($content, $contentType);
         }
 
-        $path = $this->segment($variant, $index);
+        $path = $this->segment($variant, $index, $track);
 
-        $this->packageAhead($variant, $index + 1);
+        $this->packageAhead($variant, $index + 1, $track);
 
-        if ($this->keys !== null) {
-            return $this->encryptedResponse($this->encrypt((string) $this->cacheDisk()->get($path), $index), 'video/mp2t');
+        return $this->fileResponse($path, $contentType);
+    }
+
+    /**
+     * The bytes of a segment, encrypted when the stream is: with AES-128 for MPEG-TS, or with Common
+     * Encryption for a fragmented track.
+     *
+     * @throws SegmentNotFoundException
+     * @throws InvalidMediaException
+     */
+    public function segmentContents(int $variant, int $index, ?Track $track = null): string
+    {
+        if ($this->keys !== null && $track !== null) {
+            $this->ensureOneKey();
+            $this->ensureEncryptable($variant, $track);
         }
 
-        return $this->fileResponse($path, 'video/mp2t');
+        $content = (string) $this->cacheDisk()->get($this->segment($variant, $index, $track));
+
+        if ($this->keys === null) {
+            return $content;
+        }
+
+        return $track !== null
+            ? CommonEncryption::segment($this->cachedInitSegment($variant, $track), $content, $this->key(), "{$variant}|{$track->value}|{$index}")
+            : $this->encrypt($content, $index);
+    }
+
+    /**
+     * @throws SegmentNotFoundException
+     * @throws InvalidMediaException
+     */
+    protected function cachedInitSegment(int $variant, Track $track): string
+    {
+        return (string) $this->cacheDisk()->get($this->initSegment($variant, $track));
     }
 
     protected function encryptedResponse(string $content, string $contentType): Response
@@ -1339,21 +1398,24 @@ class DirectStream
 
     /**
      * The ContentProtection descriptors of an encrypted adaptation set: Common Encryption with the key
-     * ID, and ClearKey with the license URL.
+     * ID, and ClearKey with the license URL when there is one. Without it, players need the key in
+     * their ClearKey configuration.
      *
      * @return list<string>
      */
     protected function contentProtection(): array
     {
-        if ($this->keys === null || $this->licenseUrl === null) {
+        if ($this->keys === null) {
             return [];
         }
 
+        $clearKey = '      <ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e" value="ClearKey1.0"';
+
         return [
             '      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="'.$this->key()->keyIdUuid().'"/>',
-            '      <ContentProtection schemeIdUri="urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e" value="ClearKey1.0">',
-            '        <dashif:Laurl>'.$this->xml(($this->licenseUrl)()).'</dashif:Laurl>',
-            '      </ContentProtection>',
+            ...($this->licenseUrl !== null
+                ? [$clearKey.'>', '        <dashif:Laurl>'.$this->xml(($this->licenseUrl)()).'</dashif:Laurl>', '      </ContentProtection>']
+                : [$clearKey.'/>']),
         ];
     }
 
@@ -1417,6 +1479,10 @@ class DirectStream
      */
     protected function videoVariants(): array
     {
+        if ($this->tracks !== null) {
+            return $this->tracks['video'];
+        }
+
         return array_values(array_filter(array_keys($this->opener->paths()), fn (int $variant): bool => $this->probe($variant)->hasVideo()));
     }
 
@@ -1425,6 +1491,10 @@ class DirectStream
      */
     protected function audioVariant(): ?int
     {
+        if ($this->tracks !== null) {
+            return $this->tracks['audio'];
+        }
+
         foreach (array_keys($this->opener->paths()) as $variant) {
             if ($this->probe($variant)->hasAudio()) {
                 return $variant;
