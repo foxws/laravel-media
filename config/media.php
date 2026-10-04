@@ -53,6 +53,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Delivery
+    |--------------------------------------------------------------------------
+    |
+    | Streaming straight from the stored files, packaging segments when they
+    | are requested. Keyframe indexes are kept in the cache store (null for the
+    | default store) for index_lifetime seconds, per version of a file.
+    |
+    */
+
+    'delivery' => [
+        'segment_duration' => (float) env('MEDIA_DELIVERY_SEGMENT_DURATION', 6),
+        'cache_store' => env('MEDIA_DELIVERY_CACHE_STORE'),
+        'index_lifetime' => (int) env('MEDIA_DELIVERY_INDEX_LIFETIME', 604800),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Timeout
     |--------------------------------------------------------------------------
     |

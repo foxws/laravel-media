@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Foxws\Media;
 
+use Foxws\Media\Delivery\KeyframeIndex;
+use Foxws\Media\Delivery\KeyframeIndexer;
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\FFMpeg\FFMpegBuilder;
 use Foxws\Media\FFMpeg\Scene;
@@ -32,6 +34,9 @@ class Opener
 
     /** @var array<string, list<Scene>> */
     protected array $scenes = [];
+
+    /** @var array<string, KeyframeIndex> */
+    protected array $keyframes = [];
 
     public function __construct(
         protected Disk $disk,
@@ -138,6 +143,18 @@ class Opener
     public function ffmpeg(): FFMpegBuilder
     {
         return app(FFMpegBuilder::class, ['opener' => $this]);
+    }
+
+    /**
+     * The keyframes of an opened file (the first one by default), cached on this opener and in
+     * the media.delivery.cache_store per file version, to split it into copyable segments.
+     */
+    public function keyframes(?string $path = null): KeyframeIndex
+    {
+        $media = $this->mediaFor($path);
+        $probe = $this->probe($media->path());
+
+        return $this->keyframes[$media->path()] ??= KeyframeIndexer::make()->index($media, $probe->duration(), $probe->hasVideo());
     }
 
     /**

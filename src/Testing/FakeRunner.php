@@ -34,7 +34,9 @@ class FakeRunner extends Runner
         }
 
         return match ($executable) {
-            Executable::FFProbe => [0, (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
+            Executable::FFProbe => [0, in_array('packet=pts_time,flags', $arguments, true)
+                ? $this->packets((string) end($arguments))
+                : (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
             Executable::FFMpeg => [0, $this->ffmpeg($arguments, $onOutput), ''],
             Executable::Packager => [0, $this->packager($arguments), ''],
             default => [0, '', ''],
@@ -72,6 +74,23 @@ class FakeRunner extends Runner
         }
 
         return $progress;
+    }
+
+    /**
+     * A packet list with a keyframe every two seconds of the faked duration.
+     */
+    protected function packets(string $input): string
+    {
+        $duration = (float) data_get($this->fake->probeFor($input), 'format.duration', 0);
+
+        $lines = [];
+
+        for ($time = 0.0; $time < $duration; $time += 2.0) {
+            $lines[] = sprintf('%.6f,K__', $time);
+            $lines[] = sprintf('%.6f,___', $time + 1.0);
+        }
+
+        return implode("\n", $lines)."\n";
     }
 
     /**
