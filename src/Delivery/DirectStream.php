@@ -73,6 +73,11 @@ class DirectStream
 
     protected bool $chapters = false;
 
+    /** @var list<string>|null */
+    protected ?array $chapterClasses = ['chapter'];
+
+    protected ?string $chapterGapTitle = null;
+
     protected ?int $lookAhead = null;
 
     protected ?LookAheadStrategy $lookAheadStrategy = null;
@@ -407,6 +412,48 @@ class DirectStream
         usort($markers, fn (Marker $a, Marker $b): int => $a->start <=> $b->start);
 
         return $markers;
+    }
+
+    /**
+     * Which markers the chapter track lists: those of the given classes, or every marker with null.
+     * With a gap title, the gaps between them and after the last one get a cue with that title.
+     *
+     * @param  list<string>|null  $classes
+     */
+    public function chapterTrackFrom(?array $classes = ['chapter'], ?string $gapTitle = null): static
+    {
+        $this->chapterClasses = $classes;
+        $this->chapterGapTitle = $gapTitle;
+
+        return $this;
+    }
+
+    /**
+     * The chapters as a WebVTT track, from the markers chapterTrackFrom() selects, which are the
+     * chapters of withChapters() by default.
+     */
+    public function chapterTrack(): ChapterTrack
+    {
+        $markers = array_filter($this->markers(), fn (Marker $marker): bool => $this->chapterClasses === null || in_array($marker->class, $this->chapterClasses, true));
+
+        return new ChapterTrack(array_values($markers), $this->duration(), $this->chapterGapTitle);
+    }
+
+    /**
+     * @throws SegmentNotFoundException
+     */
+    public function chapterTrackResponse(): Response
+    {
+        $track = $this->chapterTrack();
+
+        if ($track->isEmpty()) {
+            throw SegmentNotFoundException::noChapters();
+        }
+
+        return new Response($track->toWebVtt(), 200, [
+            'Content-Type' => 'text/vtt; charset=utf-8',
+            'Cache-Control' => 'public, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
+        ]);
     }
 
     /**

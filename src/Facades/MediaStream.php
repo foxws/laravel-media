@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static string url(string $name, array<string, mixed> $parameters = [])
  * @method static string hlsUrl(string $name, array<string, mixed> $parameters = [])
  * @method static string dashUrl(string $name, array<string, mixed> $parameters = [])
+ * @method static string chaptersUrl(string $name, array<string, mixed> $parameters = [])
  *
  * @see StreamRegistry
  */

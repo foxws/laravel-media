@@ -21,7 +21,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Serves the routes of Route::mediaStream(): HLS with fragmented MP4 (CMAF) or MPEG-TS segments,
- * DASH with the same fragmented MP4 segments, WebVTT subtitles, thumbnail sprite sheets, and the keys and
+ * DASH with the same fragmented MP4 segments, WebVTT subtitles and chapters, thumbnail sprite sheets, and the keys and
  * ClearKey license of encrypted streams.
  */
 class MediaStreamController
@@ -171,6 +171,16 @@ class MediaStreamController
         [, $stream] = $this->resolve($request);
 
         return $stream->thumbnailResponse($this->number($request, 'sheet'));
+    }
+
+    /**
+     * The chapters as a WebVTT track.
+     */
+    public function chapters(Request $request): Response
+    {
+        [, $stream] = $this->resolve($request);
+
+        return $stream->chapterTrackResponse();
     }
 
     public function init(Request $request): Response

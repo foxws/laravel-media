@@ -149,7 +149,7 @@ class MediaServiceProvider extends ServiceProvider
      * off that route (e.g. register the streams in routes/api.php). Subtitles are served as
      * subtitles/{subtitle}/{format}.m3u8 and subtitles/{subtitle}/{format}.vtt for HLS, and
      * subtitles/{subtitle}.vtt for DASH. Thumbnails are served as thumbnails.m3u8 and
-     * thumbnails/{sheet}.{jpg|webp}.
+     * thumbnails/{sheet}.{jpg|webp}, and chapters as chapters.vtt.
      */
     protected function registerRouteMacro(): void
     {
@@ -200,6 +200,9 @@ class MediaServiceProvider extends ServiceProvider
 
                 $router->get('thumbnails/{sheet}.{extension}', [MediaStreamController::class, 'thumbnail'])
                     ->name('thumbnail')->defaults('mediaStream', $stream)->whereNumber('sheet')->whereIn('extension', ['jpg', 'webp']);
+
+                $router->get('chapters.vtt', [MediaStreamController::class, 'chapters'])
+                    ->name('chapters')->defaults('mediaStream', $stream);
             });
         });
     }
