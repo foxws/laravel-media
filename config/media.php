@@ -60,10 +60,20 @@ return [
     | are requested. Keyframe indexes are kept in the cache store (null for the
     | default store) for index_lifetime seconds, per version of a file.
     |
+    | Packaged segments are cached on cache_disk under cache_path, which can be
+    | any disk: local storage, a mounted /tmp or RAM disk, or S3. Segments on
+    | disks with temporary URLs are served by redirecting to one that is valid
+    | for url_lifetime seconds. lock_timeout is how long concurrent requests
+    | for the same segment wait while it's packaged.
+    |
     */
 
     'delivery' => [
         'segment_duration' => (float) env('MEDIA_DELIVERY_SEGMENT_DURATION', 6),
+        'cache_disk' => env('MEDIA_DELIVERY_CACHE_DISK', 'local'),
+        'cache_path' => env('MEDIA_DELIVERY_CACHE_PATH', 'media-segments'),
+        'url_lifetime' => (int) env('MEDIA_DELIVERY_URL_LIFETIME', 3600),
+        'lock_timeout' => (int) env('MEDIA_DELIVERY_LOCK_TIMEOUT', 120),
         'cache_store' => env('MEDIA_DELIVERY_CACHE_STORE'),
         'index_lifetime' => (int) env('MEDIA_DELIVERY_INDEX_LIFETIME', 604800),
     ],

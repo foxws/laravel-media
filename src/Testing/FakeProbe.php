@@ -34,6 +34,7 @@ final class FakeProbe
             'height' => $height,
             'pix_fmt' => 'yuv420p',
             'avg_frame_rate' => "{$frameRate}/1",
+            ...($codec === 'h264' ? ['profile' => 'High', 'level' => 40] : []),
             'duration' => (string) $duration,
             ...($transfer !== null ? ['color_transfer' => $transfer, 'color_primaries' => 'bt2020', 'color_space' => 'bt2020nc'] : []),
         ]];
@@ -71,6 +72,7 @@ final class FakeProbe
             'sample_rate' => '48000',
             'channels' => 2,
             'channel_layout' => 'stereo',
+            ...($codec === 'aac' ? ['profile' => 'LC'] : []),
             'duration' => (string) $duration,
         ];
     }
@@ -84,7 +86,7 @@ final class FakeProbe
         return [
             'streams' => $streams,
             'chapters' => [],
-            'format' => ['format_name' => $format, 'duration' => (string) $duration],
+            'format' => ['format_name' => $format, 'duration' => (string) $duration, 'bit_rate' => '4500000'],
         ];
     }
 }
