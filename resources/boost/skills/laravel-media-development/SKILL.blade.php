@@ -241,7 +241,7 @@ Each executable resolves lazily: an absolute path from config, or a command name
 
 ## Configuration
 
-Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}`. The config is read once per application into `Foxws\\Media\\MediaConfig`, which the package's services receive through the container. Set config values in tests before using `Media` or calling `Media::fake()`.
+Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}`. The config is read once per application into `Foxws\Media\MediaConfig`, which the package's services receive through the container. Set config values in tests before using `Media` or calling `Media::fake()`.
 
 | Key | Purpose |
 | --- | --- |
