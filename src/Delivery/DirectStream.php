@@ -48,6 +48,14 @@ class DirectStream
 
     protected bool $fragmented = false;
 
+    /** @var list<Subtitle> */
+    protected array $externalSubtitles = [];
+
+    protected bool $embeddedSubtitles = false;
+
+    /** @var list<Subtitle>|null */
+    protected ?array $subtitles = null;
+
     public function __construct(
         protected Opener $opener,
         protected Runner $runner,
@@ -90,6 +98,139 @@ class DirectStream
     public function isFragmented(): bool
     {
         return $this->fragmented;
+    }
+
+    /**
+     * Add a WebVTT subtitle file, from the disk the media was opened from unless another is given.
+     */
+    public function withSubtitles(string $path, ?string $language = null, ?string $label = null, Disk|Filesystem|string|null $disk = null): static
+    {
+        $this->externalSubtitles[] = new Subtitle(
+            label: $label ?? $language ?? 'Subtitles '.(count($this->externalSubtitles) + 1),
+            language: $language,
+            disk: $disk !== null ? Disk::make($disk) : $this->opener->disk(),
+            path: $path,
+        );
+
+        $this->subtitles = null;
+
+        return $this;
+    }
+
+    /**
+     * Also offer the text subtitle streams of the first opened file (SubRip, MP4 text, ASS, ...),
+     * converted to WebVTT when first requested. Bitmap subtitles are left out.
+     */
+    public function withEmbeddedSubtitles(bool $embedded = true): static
+    {
+        $this->embeddedSubtitles = $embedded;
+        $this->subtitles = null;
+
+        return $this;
+    }
+
+    /**
+     * The subtitle tracks: the added files first, then the embedded streams.
+     *
+     * @return list<Subtitle>
+     */
+    public function subtitles(): array
+    {
+        if ($this->subtitles !== null) {
+            return $this->subtitles;
+        }
+
+        $subtitles = $this->externalSubtitles;
+
+        if ($this->embeddedSubtitles) {
+            foreach ($this->probe(0)->subtitleStreams() as $stream) {
+                if (TextSubtitleCodec::supports($stream->codecName)) {
+                    $subtitles[] = new Subtitle(
+                        label: $stream->tags['title'] ?? $stream->language ?? 'Subtitles '.(count($subtitles) + 1),
+                        language: $stream->language,
+                        stream: $stream->index,
+                    );
+                }
+            }
+        }
+
+        return $this->subtitles = $subtitles;
+    }
+
+    /**
+     * The HLS media playlist of a subtitle track: one segment with the whole WebVTT file.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function subtitlePlaylist(int $subtitle, string $url): string
+    {
+        $this->subtitleFor($subtitle);
+        $duration = $this->duration();
+
+        return implode("\n", [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            '#EXT-X-TARGETDURATION:'.(int) ceil($duration),
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+            '#EXTINF:'.number_format($duration, 6, '.', '').',',
+            $url,
+            '#EXT-X-ENDLIST',
+        ])."\n";
+    }
+
+    /**
+     * The WebVTT content of a subtitle track. Embedded streams are converted once, under a lock,
+     * and cached on the cache disk.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function subtitle(int $subtitle): string
+    {
+        $track = $this->subtitleFor($subtitle);
+
+        if (! $track->isEmbedded()) {
+            return $track->disk?->get((string) $track->path) ?? throw SegmentNotFoundException::forSubtitle($subtitle);
+        }
+
+        $media = $this->media(0);
+        $path = $this->cachePrefix($media, withDuration: false)."/subtitles/{$track->stream}.vtt";
+
+        if (! $this->cacheDisk()->exists($path)) {
+            Cache::lock("media:segment:{$path}", Config::integer('media.delivery.lock_timeout', 120))
+                ->block(Config::integer('media.delivery.lock_timeout', 120), function () use ($media, $track, $path): void {
+                    if (! $this->cacheDisk()->exists($path)) {
+                        $this->convertSubtitle($media, (int) $track->stream, $path);
+                    }
+                });
+        }
+
+        return (string) $this->cacheDisk()->get($path);
+    }
+
+    /**
+     * A WebVTT response for a subtitle track. HLS players line up cues with the media through an
+     * X-TIMESTAMP-MAP header, so pass the timestamp offset of the segments the playlist uses:
+     * 0 for MPEG-TS, FragmentedMp4::TIMESTAMP_OFFSET for fragmented MP4, and null for DASH.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function subtitleResponse(int $subtitle, ?float $timestampOffset = null): Response
+    {
+        $content = $this->subtitle($subtitle);
+
+        if ($timestampOffset !== null) {
+            $map = 'X-TIMESTAMP-MAP=MPEGTS:'.(int) round($timestampOffset * 90000).',LOCAL:00:00:00.000';
+            $content = (string) preg_replace('/^X-TIMESTAMP-MAP=.*\R/m', '', $content);
+            $content = str_starts_with(ltrim($content, "\u{FEFF}"), 'WEBVTT')
+                ? (string) preg_replace('/^\x{FEFF}?(WEBVTT[^\r\n]*)/u', "\$1\n{$map}", $content, 1)
+                : "WEBVTT\n{$map}\n\n{$content}";
+        }
+
+        return new Response($content, 200, [
+            'Content-Type' => 'text/vtt; charset=utf-8',
+            'Cache-Control' => 'public, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
+        ]);
     }
 
     /**
@@ -162,14 +303,20 @@ class DirectStream
      * track of every file with video, and the audio track of the first file with audio as the audio rendition.
      *
      * @param  callable(int, Track|null): string  $playlistUrl  Receives the variant's index and its track (null for MPEG-TS) and returns its media playlist URL.
+     * @param  (callable(int): string)|null  $subtitleUrl  Receives a subtitle track's index and returns its media playlist URL. Required with subtitles.
+     *
+     * @throws InvalidArgumentException
      */
-    public function masterPlaylist(callable $playlistUrl): string
+    public function masterPlaylist(callable $playlistUrl, ?callable $subtitleUrl = null): string
     {
+        $subtitles = $this->subtitleRenditions($subtitleUrl);
+        $group = $subtitles !== [] ? 'subtitles' : null;
+
         if (! $this->fragmented) {
-            $lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS'];
+            $lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS', ...$subtitles];
 
             foreach ($this->opener->paths() as $variant => $path) {
-                $lines[] = $this->streamInf($path, Codecs::for($this->opener->probe($path)));
+                $lines[] = $this->streamInf($path, Codecs::for($this->opener->probe($path)), subtitleGroup: $group);
                 $lines[] = $playlistUrl($variant, null);
             }
 
@@ -178,7 +325,7 @@ class DirectStream
 
         $this->ensureUnencrypted();
 
-        $lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS'];
+        $lines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS', ...$subtitles];
         $audio = $this->audioVariant();
         $audioCodec = $audio !== null ? Codecs::audio($this->probe($audio)->audioStream() ?? throw SegmentNotFoundException::for($audio, 0)) : null;
         $videos = $this->videoVariants();
@@ -191,12 +338,12 @@ class DirectStream
             $video = $this->probe($variant)->videoStream();
             $codecs = Codecs::join([$video !== null ? Codecs::video($video) : null, ...($audio !== null ? [$audioCodec] : [])]);
 
-            $lines[] = $this->streamInf($this->opener->paths()[$variant], $codecs, $audio !== null ? 'audio' : null);
+            $lines[] = $this->streamInf($this->opener->paths()[$variant], $codecs, $audio !== null ? 'audio' : null, $group);
             $lines[] = $playlistUrl($variant, Track::Video);
         }
 
         if ($videos === [] && $audio !== null) {
-            $lines[] = $this->streamInf($this->opener->paths()[$audio], $audioCodec);
+            $lines[] = $this->streamInf($this->opener->paths()[$audio], $audioCodec, subtitleGroup: $group);
             $lines[] = $playlistUrl($audio, Track::Audio);
         }
 
@@ -272,14 +419,19 @@ class DirectStream
      *
      * @param  callable(int, Track): string  $initUrl  Receives the variant's index and the track, and returns the URL of the initialization segment.
      * @param  callable(Segment, int, Track): string  $segmentUrl  Receives the segment, the variant's index and the track, and returns its URL.
+     * @param  (callable(int): string)|null  $subtitleUrl  Receives a subtitle track's index and returns the URL of its WebVTT file. Required with subtitles.
      *
      * @throws InvalidArgumentException
      */
-    public function dashManifest(callable $initUrl, callable $segmentUrl): string
+    public function dashManifest(callable $initUrl, callable $segmentUrl, ?callable $subtitleUrl = null): string
     {
         $this->ensureUnencrypted();
 
-        $duration = max([0.0, ...array_map(fn (string $path): float => $this->opener->probe($path)->duration(), $this->opener->paths())]);
+        if ($this->subtitles() !== [] && $subtitleUrl === null) {
+            throw new InvalidArgumentException('Streams with subtitles need the URLs of their WebVTT files.');
+        }
+
+        $duration = $this->duration();
         $sets = [];
 
         if (($videos = $this->videoVariants()) !== []) {
@@ -293,6 +445,19 @@ class DirectStream
             $lang = $language !== null && $language !== 'und' ? ' lang="'.$this->xml($language).'"' : '';
 
             $sets[] = '    <AdaptationSet id="1" contentType="audio" mimeType="audio/mp4"'.$lang.' startWithSAP="1">'."\n".$this->representation($audio, Track::Audio, $initUrl, $segmentUrl)."\n".'    </AdaptationSet>';
+        }
+
+        // Text sets point straight at the WebVTT file, without SegmentBase, which players load as one segment.
+        foreach ($this->subtitles() as $index => $subtitle) {
+            $sets[] = implode("\n", [
+                '    <AdaptationSet id="'.($index + 2).'" contentType="text" mimeType="text/vtt"'.($subtitle->language !== null && $subtitle->language !== 'und' ? ' lang="'.$this->xml($subtitle->language).'"' : '').'>',
+                '      <Label>'.$this->xml($subtitle->label).'</Label>',
+                '      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="subtitle"/>',
+                '      <Representation id="text-'.$index.'" bandwidth="256">',
+                '        <BaseURL>'.$this->xml($subtitleUrl !== null ? $subtitleUrl($index) : '').'</BaseURL>',
+                '      </Representation>',
+                '    </AdaptationSet>',
+            ]);
         }
 
         return implode("\n", [
@@ -538,12 +703,79 @@ class DirectStream
         return "{$this->cachePrefix($media)}/{$track->value}/init.mp4";
     }
 
-    protected function cachePrefix(Media $media): string
+    protected function cachePrefix(Media $media, bool $withDuration = true): string
     {
         $prefix = trim(Config::string('media.delivery.cache_path', 'media-segments'), '/');
-        $duration = Number::format($this->targetDuration());
+        $duration = $withDuration ? '/'.Number::format($this->targetDuration()) : '';
 
-        return ltrim("{$prefix}/{$media->versionKey()}/{$duration}", '/');
+        return ltrim("{$prefix}/{$media->versionKey()}{$duration}", '/');
+    }
+
+    /**
+     * Convert an embedded text subtitle stream to WebVTT on the cache disk.
+     */
+    protected function convertSubtitle(Media $media, int $stream, string $path): void
+    {
+        $directory = $this->directories->create();
+
+        try {
+            $this->runner->run(Executable::FFMpeg, [
+                '-y',
+                '-hide_banner',
+                '-nostdin',
+                '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
+                '-i', $media->inputPath(),
+                '-map', "0:{$stream}",
+                '-c:s', 'webvtt',
+                '-f', 'webvtt',
+                $directory->path(basename($path)),
+            ]);
+
+            $this->exporter->export($directory->path(), $this->cacheDisk(), dirname($path), move: true);
+        } finally {
+            $directory->delete();
+        }
+    }
+
+    /**
+     * @throws SegmentNotFoundException
+     */
+    protected function subtitleFor(int $subtitle): Subtitle
+    {
+        return $this->subtitles()[$subtitle] ?? throw SegmentNotFoundException::forSubtitle($subtitle);
+    }
+
+    /**
+     * The #EXT-X-MEDIA lines of the subtitle tracks.
+     *
+     * @param  (callable(int): string)|null  $subtitleUrl
+     * @return list<string>
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function subtitleRenditions(?callable $subtitleUrl): array
+    {
+        $lines = [];
+
+        foreach ($this->subtitles() as $index => $subtitle) {
+            if ($subtitleUrl === null) {
+                throw new InvalidArgumentException('Streams with subtitles need the URLs of their playlists.');
+            }
+
+            $lines[] = '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="'.str_replace('"', "'", $subtitle->label).'"'
+                .($subtitle->language !== null && $subtitle->language !== 'und' ? ',LANGUAGE="'.str_replace('"', '', $subtitle->language).'"' : '')
+                .',DEFAULT=NO,AUTOSELECT=YES,URI="'.$subtitleUrl($index).'"';
+        }
+
+        return $lines;
+    }
+
+    /**
+     * The longest duration of the opened files.
+     */
+    protected function duration(): float
+    {
+        return max([0.0, ...array_map(fn (string $path): float => $this->opener->probe($path)->duration(), $this->opener->paths())]);
     }
 
     /**
@@ -686,7 +918,7 @@ class DirectStream
     /**
      * An #EXT-X-STREAM-INF line with the variant's bandwidth, resolution, frame rate and codecs.
      */
-    protected function streamInf(string $path, ?string $codecs, ?string $audioGroup = null): string
+    protected function streamInf(string $path, ?string $codecs, ?string $audioGroup = null, ?string $subtitleGroup = null): string
     {
         $video = $this->opener->probe($path)->videoStream();
 
@@ -696,6 +928,7 @@ class DirectStream
             'FRAME-RATE' => $video?->frameRate !== null ? number_format($video->frameRate, 3, '.', '') : null,
             'CODECS' => $codecs !== null ? "\"{$codecs}\"" : null,
             'AUDIO' => $audioGroup !== null ? "\"{$audioGroup}\"" : null,
+            'SUBTITLES' => $subtitleGroup !== null ? "\"{$subtitleGroup}\"" : null,
         ]);
 
         return '#EXT-X-STREAM-INF:'.implode(',', array_map(fn (string $key, string $value): string => "{$key}={$value}", array_keys($attributes), $attributes));
