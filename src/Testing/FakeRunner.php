@@ -39,7 +39,6 @@ class FakeRunner extends Runner
                 ? $this->packets((string) end($arguments))
                 : (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
             Executable::FFMpeg => [0, $this->ffmpeg($arguments, $onOutput), ''],
-            Executable::Packager => [0, $this->packager($arguments), ''],
             default => [0, $this->fake->responseFor($executable, $arguments), ''],
         };
     }
@@ -110,24 +109,6 @@ class FakeRunner extends Runner
         $box = fn (string $type, string $payload = ''): string => pack('N', 8 + strlen($payload)).$type.$payload;
 
         return $box('ftyp', 'isom').$box('moov').$box('moof').$box('mdat', 'fake media');
-    }
-
-    /**
-     * Write placeholder segments and manifests for the outputs of a packager run.
-     *
-     * @param  list<string>  $arguments
-     */
-    protected function packager(array $arguments): string
-    {
-        foreach ($arguments as $argument) {
-            if (preg_match('/(?:^|,)output=([^,]+)/', $argument, $matches) === 1
-                || preg_match('/^--(?:mpd_output|hls_master_playlist_output)=(.+)$/', $argument, $matches) === 1) {
-                new Filesystem()->ensureDirectoryExists(dirname($matches[1]));
-                file_put_contents($matches[1], 'fake media');
-            }
-        }
-
-        return '';
     }
 
     /**

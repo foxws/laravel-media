@@ -1,16 +1,14 @@
 {
   "$schema": "https://getcomposer.org/schema.json",
   "name": "foxws/laravel-media",
-  "description": "Probe, encode, package and stream media in Laravel with ffmpeg, ab-av1 and Shaka Packager.",
+  "description": "Probe, encode, package and stream media in Laravel with ffmpeg.",
   "keywords": [
     "laravel",
     "foxws",
     "laravel-media",
     "ffmpeg",
     "ffprobe",
-    "shaka",
     "packager",
-    "ab-av1",
     "hls",
     "dash",
     "streaming",

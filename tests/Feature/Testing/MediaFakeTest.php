@@ -128,7 +128,7 @@ it('asserts on the default media disk and on runs that did not happen', function
 
     Media::assertSaved('thumb.jpg');
     Media::assertNotSaved('other.jpg');
-    Media::assertNotRan(Executable::Packager);
+    Media::assertNotRan(Executable::FFProbe, fn (array $arguments) => in_array('-show_packets', $arguments, true));
     Media::assertNotRan(Executable::FFMpeg, fn (array $arguments) => in_array('-pass', $arguments, true));
 });
 
@@ -169,16 +169,17 @@ it('fakes the probe of any media with a wildcard', function () {
     expect(Media::fromDisk('media')->open('uploads/random-name')->probe()->hasVideo())->toBeFalse();
 });
 
-it('writes placeholder segments and manifests for packaging', function () {
-    Media::fake(['video.mp4' => FakeProbe::video()]);
+it('writes placeholder segments and real manifests for packaging', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
     Storage::fake('media');
+    Storage::fake('local');
 
     $result = Media::fromDisk('media')->open('video.mp4')->exportAsStreams()->save('streams');
 
     expect($result->path())->toBe('streams/master.m3u8');
     Media::assertSaved('streams/manifest.mpd', 'media');
-    Media::assertSaved('streams/0_video.mp4', 'media');
-    Media::assertRan(Executable::Packager, fn (array $arguments) => in_array('--allow_codec_switching', $arguments, true));
+    Media::assertSaved('streams/0_video/0.m4s', 'media');
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('+frag_keyframe+empty_moov+default_base_moof+frag_discont', $arguments, true));
 });
 
 it('fakes a keyframe every two seconds', function () {

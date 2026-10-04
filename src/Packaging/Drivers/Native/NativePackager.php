@@ -213,7 +213,7 @@ class NativePackager implements Packager
         ]);
 
         if ($unsupported !== []) {
-            throw new InvalidArgumentException('The native packager does not support '.implode(', ', array_keys($unsupported)).'. Package with Shaka Packager instead.');
+            throw new InvalidArgumentException('The native packager does not support '.implode(', ', array_keys($unsupported)).'. Package with the shaka driver of foxws/laravel-shaka instead.');
         }
     }
 }

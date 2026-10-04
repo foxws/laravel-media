@@ -8,6 +8,9 @@ use Aws\S3\Exception\S3Exception;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
+use Foxws\Media\Facades\Media;
+use Foxws\Media\Packaging\PackagerManager;
+use Foxws\Media\Tests\Fixtures\RecordingPackager;
 use Foxws\Media\Tests\Fixtures\RemoteAdapter;
 use Foxws\Media\Tests\TestCase;
 use GuzzleHttp\Promise\Create;
@@ -165,30 +168,20 @@ function diskPath(string $disk, string $path = ''): string
 }
 
 /**
- * Fake ffprobe with probe data per input file name, and Shaka Packager writing its outputs.
+ * Fake ffprobe with probe data per input file name, and a packager driver that records each spec and
+ * writes placeholder manifests and stream outputs.
  *
  * @param  array<string, array<string, mixed>>  $probes  ffprobe output keyed by the input's file name.
  */
-function fakePackaging(array $probes = []): void
+function fakePackaging(array $probes = []): RecordingPackager
 {
-    fakeExecutable(Executable::FFProbe);
-    fakeExecutable(Executable::Packager);
+    Media::fake($probes);
 
-    Process::fake(['*' => function (PendingProcess $process) use ($probes) {
-        if (runs($process, Executable::FFProbe)) {
-            return Process::result(output: (string) json_encode($probes[basename((string) end($process->command))] ?? videoProbe()));
-        }
+    $packager = new RecordingPackager;
+    app(PackagerManager::class)->extend('recording', fn () => $packager);
+    config(['media.packager.default' => 'recording']);
 
-        foreach ($process->command as $argument) {
-            if (preg_match('/(?:^|,)output=([^,]+)/', $argument, $matches) === 1
-                || preg_match('/^--(?:mpd_output|hls_master_playlist_output)=(.+)$/', $argument, $matches) === 1) {
-                @mkdir(dirname($matches[1]), 0777, true);
-                file_put_contents($matches[1], 'packaged');
-            }
-        }
-
-        return Process::result();
-    }]);
+    return $packager;
 }
 
 /**
