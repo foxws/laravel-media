@@ -154,6 +154,25 @@ MediaStream::define('videos', fn (Video $video) => Media::fromDisk('videos')->op
 - **Embedded streams:** SubRip, MP4 text, ASS/SSA and WebVTT streams are converted with `-c:s webvtt` once and cached; bitmap subtitles (PGS, DVD) are skipped. Their label is the stream's title or language.
 - **Without routes:** `masterPlaylist($playlistUrl, $subtitleUrl)`, `dashManifest($initUrl, $segmentUrl, $subtitleUrl)`, `subtitlePlaylist($subtitle, $vttUrl)` and `subtitleResponse($subtitle, $timestampOffset)`: pass `0` for MPEG-TS, `FragmentedMp4::TIMESTAMP_OFFSET` for CMAF and `null` for DASH.
 
+### Thumbnails
+
+@boostsnippet("Seek previews from the manifest", "php")
+use Foxws\Media\FFMpeg\ThumbnailsResult;
+
+// in the job that stores the video: sampling a whole video is too slow for a request
+$result = Media::fromDisk('videos')->open($path)->thumbnails()->every(5)->grid(10, 10)->toDisk('storyboards')->save("{$video->id}/storyboard");
+$video->update(['thumbnails' => $result->toArray()]);
+
+// in the stream definition
+->stream()->withThumbnails(ThumbnailsResult::fromArray($video->thumbnails))
+@endboostsnippet
+
+- **HLS:** an `#EXT-X-IMAGE-STREAM-INF` image stream (sheet resolution, `CODECS="jpeg"` or `"webp"`) in both `cmaf.m3u8` and `hls.m3u8`, with an image playlist (`#EXT-X-IMAGES-ONLY`) that has an `#EXT-X-TILES` grid per sheet.
+- **DASH:** an `image` adaptation set with the DASH-IF `thumbnail_tile` property (e.g. `10x10`) and every sheet in a `SegmentList`, so sheet URLs can be signed.
+- **Players:** Shaka Player reads both through `getImageTracks()` and `getThumbnails($trackId, $time)`, so the player no longer needs `addThumbnailsTrack()` with the WebVTT file. The WebVTT file still works for players that only read that.
+- **Serving:** sheets come from the result's disk (`fromArray($data, $disk)` overrides it), as a redirect to a temporary URL on disks that provide them. Routes: `thumbnails.m3u8` and `thumbnails/{sheet}.{jpg|webp}`.
+- `ThumbnailsResult` records the grid (`columns`, `rows`) and the tile size (`width`, `height`); `toArray()`/`fromArray()` store it in a JSON column.
+
 ### Encrypting direct streams
 
 @boostsnippet("Per-request AES-128", "php")
