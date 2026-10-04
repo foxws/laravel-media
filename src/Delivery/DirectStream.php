@@ -9,6 +9,7 @@ use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\Executables\Executable;
+use Foxws\Media\FFMpeg\ThumbnailsResult;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
 use Foxws\Media\Filesystem\Media;
@@ -55,6 +56,8 @@ class DirectStream
 
     /** @var list<Subtitle>|null */
     protected ?array $subtitles = null;
+
+    protected ?ThumbnailsResult $thumbnails = null;
 
     public function __construct(
         protected Opener $opener,
@@ -234,6 +237,68 @@ class DirectStream
     }
 
     /**
+     * Offer sprite sheets made with thumbnails() as an image track, for seek previews from the
+     * manifest. Make them ahead, e.g. in the job that stores the video, and keep the result with
+     * toArray(); sampling a whole video is too slow for a request.
+     */
+    public function withThumbnails(?ThumbnailsResult $thumbnails): static
+    {
+        $this->thumbnails = $thumbnails;
+
+        return $this;
+    }
+
+    public function thumbnails(): ?ThumbnailsResult
+    {
+        return $this->thumbnails;
+    }
+
+    /**
+     * The HLS image media playlist of the thumbnails: one entry per sheet, with its grid in #EXT-X-TILES.
+     *
+     * @param  callable(int): string  $sheetUrl  Receives a sheet's index and returns its URL.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function thumbnailPlaylist(callable $sheetUrl): string
+    {
+        $thumbnails = $this->thumbnails ?? throw SegmentNotFoundException::noThumbnails();
+        $longest = max([0.0, ...array_map($thumbnails->sheetDuration(...), array_keys($thumbnails->sprites))]);
+
+        $lines = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:7',
+            '#EXT-X-TARGETDURATION:'.(int) ceil($longest),
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+            '#EXT-X-IMAGES-ONLY',
+        ];
+
+        foreach (array_keys($thumbnails->sprites) as $sheet) {
+            $lines[] = '#EXTINF:'.number_format($thumbnails->sheetDuration($sheet), 6, '.', '').',';
+            $lines[] = "#EXT-X-TILES:RESOLUTION={$thumbnails->width}x{$thumbnails->height},LAYOUT={$thumbnails->columns}x{$thumbnails->rows},DURATION=".number_format($thumbnails->interval, 3, '.', '');
+            $lines[] = $sheetUrl($sheet);
+        }
+
+        $lines[] = '#EXT-X-ENDLIST';
+
+        return implode("\n", $lines)."\n";
+    }
+
+    /**
+     * A response for a sprite sheet: a redirect to a temporary URL when its disk provides them, otherwise the file.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function thumbnailResponse(int $sheet): Response
+    {
+        $thumbnails = $this->thumbnails ?? throw SegmentNotFoundException::noThumbnails();
+        $path = $thumbnails->sprites[$sheet] ?? throw SegmentNotFoundException::forSheet($sheet);
+
+        return $this->fileResponse($path, $this->imageType($thumbnails), $thumbnails->disk);
+    }
+
+    /**
      * Encrypt segments with AES-128 for each request. The cached segments stay unencrypted, so they
      * can be served with any key. Players fetch the key from the key URL; serve it with keyResponse().
      * Route::mediaStream() sets the key URL itself.
@@ -304,13 +369,15 @@ class DirectStream
      *
      * @param  callable(int, Track|null): string  $playlistUrl  Receives the variant's index and its track (null for MPEG-TS) and returns its media playlist URL.
      * @param  (callable(int): string)|null  $subtitleUrl  Receives a subtitle track's index and returns its media playlist URL. Required with subtitles.
+     * @param  (callable(): string)|null  $thumbnailUrl  Returns the URL of the thumbnails' image playlist. Required with thumbnails.
      *
      * @throws InvalidArgumentException
      */
-    public function masterPlaylist(callable $playlistUrl, ?callable $subtitleUrl = null): string
+    public function masterPlaylist(callable $playlistUrl, ?callable $subtitleUrl = null, ?callable $thumbnailUrl = null): string
     {
         $subtitles = $this->subtitleRenditions($subtitleUrl);
         $group = $subtitles !== [] ? 'subtitles' : null;
+        $images = $this->imageStream($thumbnailUrl);
 
         if (! $this->fragmented) {
             $lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-INDEPENDENT-SEGMENTS', ...$subtitles];
@@ -320,7 +387,7 @@ class DirectStream
                 $lines[] = $playlistUrl($variant, null);
             }
 
-            return implode("\n", $lines)."\n";
+            return implode("\n", [...$lines, ...$images])."\n";
         }
 
         $this->ensureUnencrypted();
@@ -347,7 +414,7 @@ class DirectStream
             $lines[] = $playlistUrl($audio, Track::Audio);
         }
 
-        return implode("\n", $lines)."\n";
+        return implode("\n", [...$lines, ...$images])."\n";
     }
 
     /**
@@ -420,10 +487,11 @@ class DirectStream
      * @param  callable(int, Track): string  $initUrl  Receives the variant's index and the track, and returns the URL of the initialization segment.
      * @param  callable(Segment, int, Track): string  $segmentUrl  Receives the segment, the variant's index and the track, and returns its URL.
      * @param  (callable(int): string)|null  $subtitleUrl  Receives a subtitle track's index and returns the URL of its WebVTT file. Required with subtitles.
+     * @param  (callable(int): string)|null  $thumbnailUrl  Receives a sprite sheet's index and returns its URL. Required with thumbnails.
      *
      * @throws InvalidArgumentException
      */
-    public function dashManifest(callable $initUrl, callable $segmentUrl, ?callable $subtitleUrl = null): string
+    public function dashManifest(callable $initUrl, callable $segmentUrl, ?callable $subtitleUrl = null, ?callable $thumbnailUrl = null): string
     {
         $this->ensureUnencrypted();
 
@@ -458,6 +526,14 @@ class DirectStream
                 '      </Representation>',
                 '    </AdaptationSet>',
             ]);
+        }
+
+        if ($this->thumbnails !== null) {
+            $sets[] = $this->thumbnailAdaptationSet(
+                $this->thumbnails,
+                count($this->subtitles()) + 2,
+                $thumbnailUrl ?? throw new InvalidArgumentException('Streams with thumbnails need the URLs of their sprite sheets.'),
+            );
         }
 
         return implode("\n", [
@@ -576,9 +652,9 @@ class DirectStream
         return $this->fileResponse($path, 'video/mp2t');
     }
 
-    protected function fileResponse(string $path, string $contentType): Response
+    protected function fileResponse(string $path, string $contentType, ?Disk $disk = null): Response
     {
-        $disk = $this->cacheDisk();
+        $disk ??= $this->cacheDisk();
         $lifetime = Config::integer('media.delivery.url_lifetime', 3600);
 
         if (! $disk->isLocal() && $disk->providesTemporaryUrls()) {
@@ -768,6 +844,89 @@ class DirectStream
         }
 
         return $lines;
+    }
+
+    /**
+     * The #EXT-X-IMAGE-STREAM-INF line of the thumbnails, with the size of a whole sheet.
+     *
+     * @param  (callable(): string)|null  $thumbnailUrl
+     * @return list<string>
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function imageStream(?callable $thumbnailUrl): array
+    {
+        if ($this->thumbnails === null) {
+            return [];
+        }
+
+        if ($thumbnailUrl === null) {
+            throw new InvalidArgumentException('Streams with thumbnails need the URL of their image playlist.');
+        }
+
+        $thumbnails = $this->thumbnails;
+
+        return [sprintf(
+            '#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS="%s",URI="%s"',
+            $this->thumbnailBandwidth($thumbnails),
+            $thumbnails->width * $thumbnails->columns,
+            $thumbnails->height * $thumbnails->rows,
+            $thumbnails->extension() === 'webp' ? 'webp' : 'jpeg',
+            $thumbnailUrl(),
+        )];
+    }
+
+    /**
+     * A DASH image adaptation set with the DASH-IF thumbnail tile property, listing every sheet.
+     *
+     * @param  callable(int): string  $thumbnailUrl
+     */
+    protected function thumbnailAdaptationSet(ThumbnailsResult $thumbnails, int $id, callable $thumbnailUrl): string
+    {
+        $timeline = [];
+        $start = 0;
+
+        foreach (array_keys($thumbnails->sprites) as $sheet) {
+            $duration = (int) round($thumbnails->sheetDuration($sheet) * 1000);
+            $last = array_key_last($timeline);
+
+            if ($last !== null && $timeline[$last]['d'] === $duration) {
+                $timeline[$last]['r']++;
+            } else {
+                $timeline[] = ['t' => $start, 'd' => $duration, 'r' => 0];
+            }
+
+            $start += $duration;
+        }
+
+        return implode("\n", [
+            '    <AdaptationSet id="'.$id.'" contentType="image" mimeType="'.$this->imageType($thumbnails).'">',
+            '      <Representation id="thumbnails" bandwidth="'.$this->thumbnailBandwidth($thumbnails).'" width="'.($thumbnails->width * $thumbnails->columns).'" height="'.($thumbnails->height * $thumbnails->rows).'">',
+            '        <EssentialProperty schemeIdUri="http://dashif.org/thumbnail_tile" value="'.$thumbnails->columns.'x'.$thumbnails->rows.'"/>',
+            '        <SegmentList timescale="1000">',
+            '          <SegmentTimeline>',
+            ...array_map(fn (array $s): string => '            <S t="'.$s['t'].'" d="'.$s['d'].'"'.($s['r'] > 0 ? ' r="'.$s['r'].'"' : '').'/>', $timeline),
+            '          </SegmentTimeline>',
+            ...array_map(fn (int $sheet): string => '          <SegmentURL media="'.$this->xml($thumbnailUrl($sheet)).'"/>', array_keys($thumbnails->sprites)),
+            '        </SegmentList>',
+            '      </Representation>',
+            '    </AdaptationSet>',
+        ]);
+    }
+
+    /**
+     * An estimate of the sheets' bandwidth in bits per second, at about half a bit per pixel.
+     */
+    protected function thumbnailBandwidth(ThumbnailsResult $thumbnails): int
+    {
+        $bits = $thumbnails->width * $thumbnails->height * $thumbnails->perSheet() / 2;
+
+        return (int) ceil($bits / max(1.0, $thumbnails->perSheet() * $thumbnails->interval));
+    }
+
+    protected function imageType(ThumbnailsResult $thumbnails): string
+    {
+        return $thumbnails->extension() === 'webp' ? 'image/webp' : 'image/jpeg';
     }
 
     /**

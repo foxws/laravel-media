@@ -10,6 +10,8 @@ use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\FFMpeg\ThumbnailsResult;
+use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -477,3 +479,85 @@ it('throws a 404 for subtitles that do not exist', function () {
 
     Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('missing.vtt')->subtitle(1);
 })->throws(SegmentNotFoundException::class, "Subtitle 1 doesn't exist.");
+
+/**
+ * Two sprite sheets of a 2x2 grid with a thumbnail every 2 seconds, the second sheet half full.
+ */
+function thumbnailSheets(string $disk = 'videos'): ThumbnailsResult
+{
+    return new ThumbnailsResult(Disk::make($disk), ['sb_001.jpg', 'sb_002.jpg'], 'sb.vtt', 2.0, 6, columns: 2, rows: 2, width: 160, height: 90);
+}
+
+it('lists the sprite sheets with their tiles in an image playlist', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 12)]);
+
+    $playlist = Media::fromDisk('videos')->open('video.mp4')->stream()->withThumbnails(thumbnailSheets())
+        ->thumbnailPlaylist(fn (int $sheet) => "thumbnails/{$sheet}.jpg");
+
+    expect($playlist)->toBe(implode("\n", [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-TARGETDURATION:8',
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+        '#EXT-X-IMAGES-ONLY',
+        '#EXTINF:8.000000,',
+        '#EXT-X-TILES:RESOLUTION=160x90,LAYOUT=2x2,DURATION=2.000',
+        'thumbnails/0.jpg',
+        '#EXTINF:4.000000,',
+        '#EXT-X-TILES:RESOLUTION=160x90,LAYOUT=2x2,DURATION=2.000',
+        'thumbnails/1.jpg',
+        '#EXT-X-ENDLIST',
+        '',
+    ]));
+});
+
+it('adds the image stream to the master playlists', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 12)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withThumbnails(thumbnailSheets());
+
+    $line = '#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=3600,RESOLUTION=320x180,CODECS="jpeg",URI="thumbnails.m3u8"';
+
+    expect($stream->masterPlaylist(fn () => 'playlist', thumbnailUrl: fn () => 'thumbnails.m3u8'))->toEndWith("{$line}\n")
+        ->and($stream->fragmented()->masterPlaylist(fn () => 'playlist', thumbnailUrl: fn () => 'thumbnails.m3u8'))->toEndWith("{$line}\n")
+        ->and(fn () => $stream->masterPlaylist(fn () => 'playlist'))->toThrow(InvalidArgumentException::class, 'URL of their image playlist')
+        ->and(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'URLs of their sprite sheets');
+});
+
+it('adds the sprite sheets to the dash manifest as thumbnail tiles', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 12)]);
+
+    $manifest = Media::fromDisk('videos')->open('video.mp4')->stream()->withThumbnails(thumbnailSheets())
+        ->dashManifest(fn () => 'init', fn () => 'segment', thumbnailUrl: fn (int $sheet) => "thumbnails/{$sheet}.jpg?a=1&b=2");
+
+    expect($manifest)->toContain(implode("\n", [
+        '    <AdaptationSet id="2" contentType="image" mimeType="image/jpeg">',
+        '      <Representation id="thumbnails" bandwidth="3600" width="320" height="180">',
+        '        <EssentialProperty schemeIdUri="http://dashif.org/thumbnail_tile" value="2x2"/>',
+        '        <SegmentList timescale="1000">',
+        '          <SegmentTimeline>',
+        '            <S t="0" d="8000"/>',
+        '            <S t="8000" d="4000"/>',
+        '          </SegmentTimeline>',
+        '          <SegmentURL media="thumbnails/0.jpg?a=1&amp;b=2"/>',
+        '          <SegmentURL media="thumbnails/1.jpg?a=1&amp;b=2"/>',
+        '        </SegmentList>',
+        '      </Representation>',
+        '    </AdaptationSet>',
+    ]));
+});
+
+it('serves sprite sheets from their disk', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::disk('videos')->put('sb_002.jpg', 'sheet');
+    $remote = remoteDisk(Storage::fake('remote-storyboards')->path(''));
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+
+    $local = $stream->withThumbnails(thumbnailSheets())->thumbnailResponse(1);
+    $redirect = $stream->withThumbnails(new ThumbnailsResult(Disk::make($remote), ['sb_001.jpg'], 'sb.vtt', 2.0, 4, 2, 2))->thumbnailResponse(0);
+
+    expect($local->headers->get('Content-Type'))->toBe('image/jpeg')
+        ->and($redirect)->toBeInstanceOf(RedirectResponse::class)
+        ->and(fn () => $stream->thumbnailResponse(5))->toThrow(SegmentNotFoundException::class, "Thumbnail sheet 5 doesn't exist.")
+        ->and(fn () => $stream->withThumbnails(null)->thumbnailPlaylist(fn () => 'sheet'))->toThrow(SegmentNotFoundException::class, 'This stream has no thumbnails.');
+});
