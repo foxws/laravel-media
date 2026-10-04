@@ -145,9 +145,12 @@ class MediaServiceProvider extends ServiceProvider
      * Route::mediaStream('videos/{video}', 'videos') serves a stream defined with MediaStream::define():
      * cmaf.m3u8 and dash.mpd with {variant}/{track}/index.m3u8, {variant}/{track}/init.mp4 and
      * {variant}/{track}/{segment}.m4s, and hls.m3u8 with {variant}/index.m3u8, {variant}/{segment}.ts
-     * and {variant}/keys/{period}.key. Subtitles are served as subtitles/{subtitle}/{format}.m3u8 and
-     * subtitles/{subtitle}/{format}.vtt for HLS, and subtitles/{subtitle}.vtt for DASH. Thumbnails are
-     * served as thumbnails.m3u8 and thumbnails/{sheet}.{jpg|webp}.
+     * and {variant}/keys/{period}.key, which CMAF playlists of encrypted streams use too. Encrypted DASH
+     * streams fetch their ClearKey license from license.json, with GET or POST, so keep CSRF protection
+     * off that route (e.g. register the streams in routes/api.php). Subtitles are served as
+     * subtitles/{subtitle}/{format}.m3u8 and subtitles/{subtitle}/{format}.vtt for HLS, and
+     * subtitles/{subtitle}.vtt for DASH. Thumbnails are served as thumbnails.m3u8 and
+     * thumbnails/{sheet}.{jpg|webp}.
      */
     protected function registerRouteMacro(): void
     {
@@ -168,6 +171,9 @@ class MediaServiceProvider extends ServiceProvider
 
                 $router->get('{variant}/keys/{period}.key', [MediaStreamController::class, 'key'])
                     ->name('key')->defaults('mediaStream', $stream)->whereNumber(['variant', 'period']);
+
+                $router->match(['GET', 'POST'], 'license.json', [MediaStreamController::class, 'license'])
+                    ->name('license')->defaults('mediaStream', $stream);
 
                 $router->get('dash.mpd', [MediaStreamController::class, 'dash'])
                     ->name('dash')->defaults('mediaStream', $stream);

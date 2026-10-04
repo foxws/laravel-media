@@ -13,6 +13,7 @@ use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 beforeEach(function () {
     Storage::fake('videos');
@@ -62,6 +63,25 @@ it('has no keys for unencrypted streams', function () {
     MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"));
 
     $this->get('videos/1/0/keys/0.key')->assertNotFound();
+    $this->post('videos/1/license.json')->assertNotFound();
+});
+
+it('links the key and the clearkey license of encrypted cmaf and dash streams', function () {
+    $key = EncryptionKey::derive('secret', 'video:1');
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()->withEncryption($key))->signed();
+
+    $master = (string) $this->get(URL::temporarySignedRoute('media.videos.cmaf', now()->addHour(), ['video' => 1]))->assertOk()->getContent();
+    preg_match('#http://localhost/videos/1/0/video/index\.m3u8\?[^\s"]+#', $master, $playlistUrl);
+
+    $this->get($playlistUrl[0])->assertSee('#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI="http://localhost/videos/1/0/keys/0.key?expires=', escape: false);
+
+    $manifest = simplexml_load_string((string) $this->get(MediaStream::dashUrl('videos', ['video' => 1]))->assertOk()->getContent());
+    $licenseUrl = (string) $manifest->Period->AdaptationSet[0]->ContentProtection[1]->children('https://dashif.org/CPS')->Laurl;
+
+    expect($licenseUrl)->toStartWith('http://localhost/videos/1/license.json?expires=');
+    $this->postJson($licenseUrl, ['kids' => [], 'type' => 'temporary'])->assertOk()->assertExactJson(['keys' => [$key->toJsonWebKey()], 'type' => 'temporary']);
+    $this->get($licenseUrl)->assertOk();
+    $this->post('videos/1/license.json')->assertForbidden();
 });
 
 it('only serves signed streams with a valid signature and signs every url', function () {

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Delivery\CommonEncryption;
+use Foxws\Media\Delivery\DirectStream;
 use Foxws\Media\Delivery\LookAheadStrategy;
 use Foxws\Media\Delivery\Marker;
 use Foxws\Media\Delivery\PackageSegments;
@@ -388,13 +390,111 @@ it('describes every track and segment in a dash manifest', function () {
     ]));
 });
 
-it('serves encrypted streams with mpeg-ts segments only', function () {
+/**
+ * Replace the placeholders the fake ffmpeg cached for a track with a real fragmented MP4 track.
+ *
+ * @param  list<string>  $samples
+ * @return array{init: string, media: string}
+ */
+function cacheFragmentedTrack(DirectStream $stream, int $segment, Track $track, string $sampleEntry, array $samples): array
+{
+    $path = $stream->segment(0, $segment, $track);
+    $fragments = fragmentedTrack($sampleEntry, $samples);
+
+    Storage::disk('segments')->put(dirname($path).'/init.mp4', $fragments['init']);
+    Storage::disk('segments')->put($path, $fragments['media']);
+
+    return $fragments;
+}
+
+it('encrypts fragmented streams with one key only', function () {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption(EncryptionKey::generate(), fn () => 'key', rotateEvery: 2);
+
+    expect(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'encrypted with one key')
+        ->and(fn () => $stream->fragmented()->masterPlaylist(fn () => 'playlist'))->toThrow(InvalidArgumentException::class, 'encrypted with one key')
+        ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidArgumentException::class, 'encrypted with one key');
+});
+
+it('adds the key to the playlists of fragmented tracks for players to use as a clear key', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $playlist = Media::fromDisk('videos')->open('video.mp4')->stream()->fragmented()
+        ->withEncryption(EncryptionKey::generate(), fn (int $period, int $variant) => "keys/{$variant}/{$period}.key")
+        ->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.m4s", initUrl: fn () => 'init.mp4');
+
+    expect($playlist)->toContain("#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI=\"keys/0/0.key\",KEYFORMAT=\"identity\",KEYFORMATVERSIONS=\"1\"\n#EXT-X-MAP:URI=\"init.mp4\"")
+        ->and(substr_count($playlist, '#EXT-X-KEY'))->toBe(1);
+});
+
+it('names the key and the clearkey license url in the dash manifest', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $key = EncryptionKey::generate();
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption($key, fn () => 'key');
+
+    expect(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'need a license URL');
+
+    $manifest = simplexml_load_string($stream->licenseUrlUsing(fn () => 'license.json?a=1&b=2')->dashManifest(fn () => 'init', fn () => 'segment'));
+
+    foreach ($manifest->Period->AdaptationSet as $set) {
+        $protection = $set->ContentProtection;
+
+        expect((string) $protection[0]['value'])->toBe('cenc')
+            ->and((string) $protection[0]->attributes('urn:mpeg:cenc:2013')['default_KID'])->toBe($key->keyIdUuid())
+            ->and((string) $protection[1]['schemeIdUri'])->toBe('urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e')
+            ->and((string) $protection[1]->children('https://dashif.org/CPS')->Laurl)->toBe('license.json?a=1&b=2');
+    }
+
+    expect($manifest->Period->AdaptationSet)->toHaveCount(2);
+});
+
+it('encrypts the initialization segment and fragments of a track as they are served', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $key = EncryptionKey::generate();
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(0)->withEncryption($key, fn () => 'key');
+    $samples = [pack('N', 33).chr(0x65).str_repeat('x', 32)];
+    $fragments = cacheFragmentedTrack($stream, 1, Track::Video, 'avc1', $samples);
+
+    $init = $stream->initSegmentResponse(0, Track::Video);
+    $fragment = $stream->segmentResponse(0, 1, Track::Video);
+
+    expect($init->getContent())->toBe(CommonEncryption::init($fragments['init'], $key))
+        ->and($init->headers->get('Cache-Control'))->toContain('private')
+        ->and($fragment->headers->get('Content-Type'))->toBe('video/mp4')
+        ->and($fragment->getContent())->not->toContain(str_repeat('x', 32))
+        ->and(decryptCenc((string) $fragment->getContent(), $key)['samples'])->toBe($samples);
+});
+
+it('serves encrypted fragments itself instead of redirecting to the cache disk', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $remote = remoteDisk(Storage::fake('remote-segments')->path(''));
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->toCache($remote)->lookAhead(0)->withEncryption(EncryptionKey::generate(), fn () => 'key');
+    $path = $stream->segment(0, 0, Track::Audio);
+    $fragments = fragmentedTrack('mp4a', ['sample']);
+    $remote->put(dirname($path).'/init.mp4', $fragments['init']);
+    $remote->put($path, $fragments['media']);
+
+    expect($stream->segmentResponse(0, 0, Track::Audio))->not->toBeInstanceOf(RedirectResponse::class)
+        ->and($stream->initSegmentResponse(0, Track::Audio))->not->toBeInstanceOf(RedirectResponse::class);
+});
+
+it('refuses to encrypt codecs whose frame headers have to stay readable', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(codec: 'av1', duration: 13)]);
     $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption(EncryptionKey::generate(), fn () => 'key');
 
-    expect(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'Encrypted direct streams use MPEG-TS segments.')
-        ->and(fn () => $stream->fragmented()->masterPlaylist(fn () => 'playlist'))->toThrow(InvalidArgumentException::class)
-        ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidArgumentException::class);
+    expect(fn () => $stream->fragmented()->mediaPlaylist(0, fn () => 'segment', initUrl: fn () => 'init'))->toThrow(InvalidMediaException::class, '[av1] isn\'t supported')
+        ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidMediaException::class, '[av1] isn\'t supported');
+});
+
+it('serves the key as a clearkey license', function () {
+    Media::fake();
+    $key = EncryptionKey::generate();
+
+    $response = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption($key)->licenseResponse();
+
+    expect(json_decode((string) $response->getContent(), true))->toBe(['keys' => [$key->toJsonWebKey()], 'type' => 'temporary'])
+        ->and($response->headers->get('Content-Type'))->toBe('application/json')
+        ->and($response->headers->get('Cache-Control'))->toContain('no-store');
 });
 
 it('offers added files and embedded text streams as subtitle renditions', function () {

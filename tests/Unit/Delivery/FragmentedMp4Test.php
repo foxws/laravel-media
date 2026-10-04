@@ -5,11 +5,6 @@ declare(strict_types=1);
 use Foxws\Media\Delivery\FragmentedMp4;
 use Foxws\Media\Exceptions\InvalidMediaException;
 
-function mp4Box(string $type, string $payload = ''): string
-{
-    return pack('N', 8 + strlen($payload)).$type.$payload;
-}
-
 it('splits the initialization segment from the fragments', function () {
     $init = mp4Box('ftyp', 'iso5').mp4Box('moov', mp4Box('mvhd', 'header'));
     $media = mp4Box('moof', 'fragment header').mp4Box('mdat', 'samples').mp4Box('moof').mp4Box('mdat', 'more');

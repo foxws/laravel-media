@@ -54,11 +54,44 @@ final readonly class EncryptionKey implements Arrayable
         return (string) hex2bin($this->key);
     }
 
+    /**
+     * The key ID as a UUID, as DASH manifests name it in cenc:default_KID.
+     */
+    public function keyIdUuid(): string
+    {
+        return implode('-', [
+            substr($this->keyId, 0, 8),
+            substr($this->keyId, 8, 4),
+            substr($this->keyId, 12, 4),
+            substr($this->keyId, 16, 4),
+            substr($this->keyId, 20),
+        ]);
+    }
+
+    /**
+     * The key as a JSON Web Key, as ClearKey licenses carry it.
+     *
+     * @return array{kty: string, kid: string, k: string}
+     */
+    public function toJsonWebKey(): array
+    {
+        return [
+            'kty' => 'oct',
+            'kid' => $this->base64Url($this->keyId),
+            'k' => $this->base64Url($this->key),
+        ];
+    }
+
     public function toArray(): array
     {
         return [
             'key' => $this->key,
             'key_id' => $this->keyId,
         ];
+    }
+
+    protected function base64Url(string $hex): string
+    {
+        return rtrim(strtr(base64_encode((string) hex2bin($hex)), '+/', '-_'), '=');
     }
 }

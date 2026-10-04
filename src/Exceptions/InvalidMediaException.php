@@ -34,6 +34,11 @@ class InvalidMediaException extends RuntimeException
         return new self("{$path} can't be streamed with fragmented MP4 segments without re-encoding: [{$codec}] isn't supported. Use H.264, HEVC, AV1 or VP9 video with AAC, MP3, AC-3, Opus or FLAC audio.");
     }
 
+    public static function notEncryptable(string $codec): self
+    {
+        return new self("Fragmented MP4 segments can only be encrypted with H.264 or HEVC video and AAC, MP3, AC-3, Opus or FLAC audio: [{$codec}] isn't supported.");
+    }
+
     public static function notFragmented(): self
     {
         return new self('ffmpeg did not write a fragmented MP4 segment with an initialization segment.');

@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with per-request AES-128 or ClearKey (CENC) encryption, subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -99,11 +99,11 @@ Route::middleware('auth')->group(fn () => Route::mediaStream('videos/{video}', '
 // the URL to give the player (signed when the stream is)
 MediaStream::url('videos', ['video' => $video]);       // CMAF: HLS with fragmented MP4, the segments DASH uses too
 MediaStream::dashUrl('videos', ['video' => $video]);   // DASH
-MediaStream::hlsUrl('videos', ['video' => $video]);    // HLS with MPEG-TS, e.g. for per-request encryption
+MediaStream::hlsUrl('videos', ['video' => $video]);    // HLS with MPEG-TS, e.g. for rotating keys or old devices
 @endboostsnippet
 
 - **Resolvers:** parameters typed as a model (any `UrlRoutable`) are bound like implicit route model binding (404 when missing); other parameters are injected by the container. Return an `Opener` or a configured `DirectStream`. Authorize inside the resolver or with route middleware.
-- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.track-playlist`, `.init` and `.fragment`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
+- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.license`, `.track-playlist`, `.init` and `.fragment`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
 - **Signed streams:** `signed($lifetime)` rejects requests without a valid signature (403) and signs every playlist, segment and key URL for `$lifetime` seconds (default `media.delivery.url_lifetime`).
 
 For full control, call the stream yourself from your own routes:
@@ -133,7 +133,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **Segments:** `ffmpeg -ss … -t … -copyts -c copy -f mpegts` copies each segment exactly, because segments start on keyframes. S3 sources are read through signed URLs with range requests, so only the needed bytes are fetched. Concurrent requests for the same segment package it once (`Cache::lock`).
 - **The segment cache:** `media.delivery.cache_disk` can be local storage, a mounted `/tmp` or RAM disk, or S3 (override per stream with `toCache()`). Segments are keyed by file version, so a changed file gets new segments. On disks with temporary URLs, `segmentResponse()` redirects to one valid for `media.delivery.url_lifetime` seconds; otherwise it returns the file with long cache headers.
 - **Errors:** out-of-range segments and variants throw `SegmentNotFoundException` (a 404). Files with codecs MPEG-TS can't carry (VP9, AV1, Opus, ...) throw `InvalidMediaException`.
-- **Formats:** each route picks its own segment format, so one stream definition serves all three URLs. Prefer `url()` (CMAF): one set of cached fragments serves HLS and DASH, and every player plays it natively. MPEG-TS (`hlsUrl()`) is for per-request AES-128 encryption and old devices; Shaka Player needs mux.js loaded (`window.muxjs`) to play it.
+- **Formats:** each route picks its own segment format, so one stream definition serves all three URLs. Prefer `url()` (CMAF): one set of cached fragments serves HLS and DASH, and every player plays it natively. MPEG-TS (`hlsUrl()`) is for rotating encryption keys and old devices; Shaka Player needs mux.js loaded (`window.muxjs`) to play it.
 - `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
 - **Cache layout:** segments are stored at `{cache_path}/{version key}/{segment duration}/{track}/{n}.m4s` (`{n}.ts` for MPEG-TS), with one `init.mp4` per track that's written with the first fragment and kept. The version key hashes the disk, path, size and modification time of the source, so every request, viewer and look-ahead job for the same file reuses the same segments, CMAF HLS and DASH share them, and a replaced file gets a new directory. `{{ $assist->artisanCommand('media:prune --older-than=0') }}` empties the segment cache, e.g. to test packaging again.
 - **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments (`.ts`, `.m4s` and `init.mp4`) and converted subtitles (`.vtt`) packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
@@ -146,7 +146,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **Codecs:** fragmented MP4 also carries AV1, VP9, Opus and FLAC. HEVC is tagged `hvc1` for Safari. AV1 gets its `av01` codec string from the probed profile, level and pixel format; VP9 has none, so players probe it themselves.
 - **DASH manifests** are static, with a `SegmentList` and millisecond `SegmentTimeline` per representation, so every segment URL can be signed. Fragments keep their source timestamps plus a fixed 10-second offset, which `presentationTimeOffset` removes again.
 - **Without routes:** `dashManifest($initUrl, $segmentUrl)`, `mediaPlaylist($variant, $segmentUrl, Track::Video, $initUrl)`, `initSegmentResponse($variant, $track)` and `segmentResponse($variant, $index, $track)`.
-- Per-request AES-128 only works with MPEG-TS: give players `hlsUrl()` for encrypted streams, because CMAF and DASH output of an encrypted stream throws. Use `exportAsDASH()` with encryption for protected DASH.
+- Encrypted streams use Common Encryption in fragmented MP4 and DASH; see below.
 
 ### Subtitles
 
@@ -218,6 +218,19 @@ MediaStream::define('videos', fn (Video $video) => Media::fromDisk('videos')->op
 - **What's cached:** segments stay unencrypted on the cache disk and are shared by every key. Keep that disk private. Encrypted streams are served by the app instead of redirecting to the cache disk.
 - **Keys:** `EncryptionKey::derive($secret, $context)` makes keys deterministic per context (HMAC-SHA256), so they don't need storing. Pass a fixed `EncryptionKey` instead of a callback for one stored key.
 - **Serving keys:** `keyResponse($period)` returns the raw 16-byte key with `no-store`, and `key($period)` returns the `EncryptionKey`. Always authorize the key route; with `Route::mediaStream()` the resolver and route middleware run for key requests too.
+
+#### CMAF and DASH (ClearKey)
+
+The same `withEncryption()` stream also serves CMAF and DASH, encrypted with Common Encryption (the `cenc` scheme, AES-128-CTR) as each fragment is requested:
+
+- **One key:** fragmented streams name their key in the initialization segment, so they take one key. A stream with `rotateEvery` throws for CMAF and DASH output; rotate keys over `hlsUrl()` only.
+- **HLS:** CMAF track playlists get `#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,KEYFORMAT="identity"` pointing at the key URL. Shaka Player fetches the raw key, reads the key ID from the initialization segment and plays it with ClearKey.
+- **DASH:** each adaptation set lists `cenc:default_KID` and a ClearKey `ContentProtection` with a `dashif:Laurl` license URL. `Route::mediaStream()` serves the license as `license.json` (GET or POST); without it, call `licenseUrlUsing(fn () => ...)` and return `$stream->licenseResponse()` (a JSON Web Key Set) from your own route.
+- **CSRF:** players POST license requests, so register the streams where CSRF protection doesn't apply (e.g. `routes/api.php`) or exclude `*/license.json` from it.
+- **Fragments:** audio samples are encrypted whole. H.264 and HEVC samples are encrypted per NAL unit, so lengths, NAL headers and parameter sets stay readable. Initialization segments get `encv`/`enca` sample entries with the scheme and key ID, plus a Common PSSH box. Each sample gets its own 8-byte IV, derived from the variant, track, segment and sample number.
+- **Codecs:** AV1 and VP9 can't be encrypted yet (their frame headers would have to be parsed), so encrypted CMAF and DASH output of them throws `InvalidMediaException`.
+- **Players:** browsers support ClearKey through EME (Chrome, Edge and Firefox). Safari doesn't, so give it `hlsUrl()`. ClearKey hands the key to the browser, so it protects segments at rest and in transit, not from viewers; use `exportAsDASH()` with a DRM system for real content protection.
+- `EncryptionKey::keyIdUuid()` formats the key ID as a UUID, and `toJsonWebKey()` as ClearKey's JSON Web Key.
 
 ## Scenes, clips and reels
 
