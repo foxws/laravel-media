@@ -82,6 +82,21 @@ it('runs ffmpeg once with time based sampling, letterboxed tiles and the sheet c
         && str_ends_with(end($process->command), '/storyboard_%03d.jpg'));
 });
 
+it('decodes only keyframes when asked', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->save('storyboard');
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->keyframesOnly()->save('keyframes');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
+        && str_ends_with(end($process->command), '/storyboard_%03d.jpg')
+        && ! in_array('-skip_frame', $process->command, true));
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
+        && str_ends_with(end($process->command), '/keyframes_%03d.jpg')
+        && array_slice($process->command, array_search('-i', $process->command, true) - 2, 2) === ['-skip_frame', 'nokey']);
+});
+
 it('continues on the next sheet when the grid is full', function () {
     fakeThumbnailProcesses(duration: 60);
     Storage::fake('videos');
