@@ -8,6 +8,7 @@ use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Filesystem\TemporaryDirectory;
 use Foxws\Media\Filters\Number;
+use Foxws\Media\Packaging\Encryption;
 use Foxws\Media\Packaging\Packager;
 use Foxws\Media\Packaging\PackagingSpec;
 use Foxws\Media\Packaging\PackagingStream;
@@ -113,6 +114,7 @@ class ShakaPackager implements Packager
             'default_text_language' => $spec->defaultTextLanguage,
             'allow_codec_switching' => $spec->allowCodecSwitching,
             'allow_approximate_segment_timeline' => $spec->approximateSegmentTimeline,
+            ...$this->encryptionOptions($spec->encryption),
             ...$spec->options,
         ];
 
@@ -131,6 +133,28 @@ class ShakaPackager implements Packager
         }
 
         return $arguments;
+    }
+
+    /**
+     * Raw key encryption options. Shaka Packager derives the keys of later crypto periods
+     * from this one when rotating.
+     *
+     * @return array<string, string|bool|null>
+     */
+    protected function encryptionOptions(?Encryption $encryption): array
+    {
+        if ($encryption === null) {
+            return [];
+        }
+
+        return [
+            'enable_raw_key_encryption' => true,
+            'keys' => sprintf('label=%s:key_id=%s:key=%s', $encryption->label ?? '', $encryption->key->keyId, $encryption->key->key),
+            'protection_scheme' => $encryption->scheme?->value,
+            'clear_lead' => Number::format($encryption->clearLead),
+            'hls_key_uri' => $encryption->keyUri(),
+            'crypto_period_duration' => $encryption->rotation !== null ? (string) $encryption->rotation : null,
+        ];
     }
 
     /**

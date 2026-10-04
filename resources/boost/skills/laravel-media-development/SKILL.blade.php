@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -192,6 +192,32 @@ $result->path();    // "videos/1/master.m3u8" (manifests come first in paths())
 - **Inputs:** they're read from local copies, downloaded from remote disks when needed. Names with commas or special characters are linked under a plain name, because Shaka's stream descriptors use commas.
 - **Drivers:** `media.packager.default` (`MEDIA_PACKAGER`) picks the default. Register another with `app(PackagerManager::class)->extend('name', fn () => new MyPackager)`, implementing `Foxws\Media\Packaging\Packager`, and choose it per export with `->using('name')`.
 - **Under `Media::fake()`**, packaging writes placeholder segments and manifests.
+
+### Encryption
+
+@boostsnippet("AES encryption", "php")
+use Foxws\Media\Encryption\ProtectionScheme;
+
+$result = Media::fromDisk('renditions')->open($renditions)
+    ->exportAsStreams()
+    ->withEncryption(scheme: ProtectionScheme::Cbcs)   // a new random key unless you pass one
+    ->toDisk('streams')
+    ->withVisibility('private')
+    ->save("videos/{$video->id}");
+
+$video->update([
+    'key_id' => $result->encryptionKey()->keyId,       // hex
+    'key' => encrypt($result->encryptionKey()->key),   // hex; store it encrypted
+]);
+@endboostsnippet
+
+- **The key file:** the raw 16-byte key is saved next to the segments as `key`, and HLS playlists reference it by that name. Keep the disk private and serve the key only through an authorized route or a short-lived signed URL. `$key->binary()` returns the bytes to respond with.
+- **Serving the key yourself:** pass `withEncryption(keyFile: null, keyUri: route('videos.key', $video))` to skip the key file and point playlists at your route.
+- **Schemes:** null uses Shaka's default, `cenc`. Use `cbcs` when one set of segments serves both HLS and DASH, including Safari. Avoid `cbc1` and `cens`, which few players support.
+- **DASH** has no key URI, so DASH players need the key themselves, for example Shaka Player's `drm.clearKeys` with the key ID and key.
+- `withClearLead($seconds)` leaves the start unencrypted, so playback can begin before the key is fetched.
+- `withKeyRotation($seconds)` uses a new key per period. Shaka derives the later keys from the first one, and only the first key is returned, so test full playback before relying on it.
+- Keys are redacted from commands, logs and events.
 
 ## Several outputs in one run
 

@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Encryption\EncryptionKey;
+use Foxws\Media\Encryption\ProtectionScheme;
 use Foxws\Media\Events\ExportCompleted;
 use Foxws\Media\Events\ExportFailed;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -102,4 +104,55 @@ it('shows the packager command without running it', function () {
     $command = Media::fromDisk('videos')->open('video.mp4')->package()->addVideoStream()->withDashManifest()->command('out');
 
     expect($command)->toBe("{$packager} in=video.mp4,stream=video,output=out/video_0.mp4 --mpd_output=out/manifest.mpd");
+});
+
+it('encrypts the segments and saves the raw key next to them', function () {
+    fakePackaging();
+    Storage::fake('streams');
+    $key = new EncryptionKey('0123456789abcdef0123456789abcdef', 'fedcba9876543210fedcba9876543210');
+
+    $result = Media::fromDisk('streams')->open('video.mp4')->exportAsHLS()
+        ->withEncryption($key, ProtectionScheme::Cbcs)
+        ->save('videos/1');
+
+    expect($result->encryptionKey())->toBe($key)
+        ->and($result->paths())->toContain('videos/1/key')
+        ->and(Storage::disk('streams')->get('videos/1/key'))->toBe(hex2bin('0123456789abcdef0123456789abcdef'));
+    Process::assertRan(fn ($process) => runs($process, Executable::Packager)
+        && in_array('--hls_key_uri=key', $process->command, true)
+        && in_array('--protection_scheme=cbcs', $process->command, true));
+});
+
+it('leaves the key file out when the app serves the key itself', function () {
+    fakePackaging();
+    Storage::fake('streams');
+
+    $builder = Media::fromDisk('streams')->open('video.mp4')->exportAsHLS()
+        ->withEncryption(keyFile: null, keyUri: 'https://app.test/videos/1/key');
+
+    $result = $builder->save('videos/1');
+
+    expect($result->paths())->not->toContain('videos/1/key')
+        ->and($result->encryptionKey())->toBe($builder->encryptionKey());
+    Process::assertRan(fn ($process) => in_array('--hls_key_uri=https://app.test/videos/1/key', $process->command, true));
+});
+
+it('keeps key rotation and clear lead in any order and generates a key for them', function () {
+    fakePackaging();
+    Storage::fake('streams');
+    $key = EncryptionKey::generate();
+
+    $spec = Media::fromDisk('streams')->open('video.mp4')->package()->addVideoStream()
+        ->withKeyRotation(300)
+        ->withClearLead(3)
+        ->withEncryption($key)
+        ->spec();
+
+    expect($spec->encryption)
+        ->key->toBe($key)
+        ->rotation->toBe(300)
+        ->clearLead->toBe(3.0);
+
+    expect(Media::fromDisk('streams')->open('video.mp4')->package()->withKeyRotation(60)->encryptionKey())->toBeInstanceOf(EncryptionKey::class)
+        ->and(Media::fromDisk('streams')->open('video.mp4')->package()->encryptionKey())->toBeNull();
 });

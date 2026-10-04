@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Filesystem;
 
+use Foxws\Media\Encryption\EncryptionKey;
+
 /**
  * The files an export wrote to its target disk.
  */
@@ -15,6 +17,7 @@ final readonly class ExportResult
     public function __construct(
         protected Disk $disk,
         protected array $paths,
+        protected ?EncryptionKey $encryptionKey = null,
     ) {}
 
     public function disk(): Disk
@@ -28,6 +31,14 @@ final readonly class ExportResult
     public function paths(): array
     {
         return $this->paths;
+    }
+
+    /**
+     * The key the output was encrypted with, to store and serve to players.
+     */
+    public function encryptionKey(): ?EncryptionKey
+    {
+        return $this->encryptionKey;
     }
 
     /**

@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Encryption\EncryptionKey;
+use Foxws\Media\Encryption\ProtectionScheme;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Packaging\Drivers\Shaka\ShakaPackager;
+use Foxws\Media\Packaging\Encryption;
 use Foxws\Media\Packaging\HlsPlaylistType;
 use Foxws\Media\Packaging\PackagerManager;
 use Foxws\Media\Packaging\PackagingSpec;
@@ -117,4 +120,27 @@ it('runs shaka packager and removes the linked inputs afterwards', function () {
     Process::assertRan(fn ($process) => $process->command[0] === $packager
         && $process->timeout === 300
         && ! file_exists(substr(explode(',', $process->command[1])[0], 3)));
+});
+
+it('encrypts with a raw key and keeps the key out of the reported command', function () {
+    fakeExecutable(Executable::Packager);
+    Storage::fake('videos');
+    $key = new EncryptionKey('0123456789abcdef0123456789abcdef', 'fedcba9876543210fedcba9876543210');
+    $spec = new PackagingSpec(
+        [new PackagingStream(StreamType::Video, shakaMedia('video.mp4'), 'video.mp4')],
+        hlsPlaylist: 'master.m3u8',
+        encryption: new Encryption($key, ProtectionScheme::Cbcs, rotation: 300, clearLead: 2.5, label: 'SD'),
+    );
+
+    expect(array_slice(shaka()->arguments($spec, '/tmp/out'), 1))->toBe([
+        '--hls_master_playlist_output=/tmp/out/master.m3u8',
+        '--enable_raw_key_encryption',
+        '--keys=label=SD:key_id=fedcba9876543210fedcba9876543210:key=0123456789abcdef0123456789abcdef',
+        '--protection_scheme=cbcs',
+        '--clear_lead=2.5',
+        '--hls_key_uri=key',
+        '--crypto_period_duration=300',
+    ])->and(shaka()->command($spec, '/tmp/out'))
+        ->toContain('--keys=[REDACTED]')
+        ->not->toContain('0123456789abcdef0123456789abcdef');
 });

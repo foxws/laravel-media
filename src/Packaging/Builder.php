@@ -6,6 +6,8 @@ namespace Foxws\Media\Packaging;
 
 use Foxws\Media\Concerns\HasContext;
 use Foxws\Media\Concerns\HasSaveCallbacks;
+use Foxws\Media\Encryption\EncryptionKey;
+use Foxws\Media\Encryption\ProtectionScheme;
 use Foxws\Media\Events\ExportCompleted;
 use Foxws\Media\Events\ExportFailed;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -53,6 +55,8 @@ class Builder
 
     /** @var array<string, string|int|float|bool|null> */
     protected array $options = [];
+
+    protected ?Encryption $encryption = null;
 
     protected ?string $driver = null;
 
@@ -195,6 +199,62 @@ class Builder
     }
 
     /**
+     * Encrypt the segments with AES (Common Encryption), using a new random key unless one is given.
+     * The raw key is written next to the segments as the key file, and HLS playlists point to it.
+     * Keep that disk private and serve the key through an authorized route or a short-lived signed
+     * URL, or pass keyFile: null and keyUri to serve a stored key yourself. DASH manifests have no
+     * key URI, so DASH players need the key themselves (e.g. Shaka Player's drm.clearKeys).
+     */
+    public function withEncryption(
+        ?EncryptionKey $key = null,
+        ?ProtectionScheme $scheme = null,
+        ?string $keyFile = 'key',
+        ?string $keyUri = null,
+        ?string $label = null,
+    ): static {
+        $this->encryption = new Encryption(
+            key: $key ?? EncryptionKey::generate(),
+            scheme: $scheme,
+            keyFile: $keyFile,
+            keyUri: $keyUri,
+            rotation: $this->encryption?->rotation,
+            clearLead: $this->encryption->clearLead ?? 0.0,
+            label: $label,
+        );
+
+        return $this;
+    }
+
+    /**
+     * Use a new key every given number of seconds. Shaka Packager derives later keys from the first
+     * one, and only the first key is returned, so test full playback before relying on it.
+     */
+    public function withKeyRotation(int $seconds): static
+    {
+        $this->encryption = $this->encryptionOrNew()->with(['rotation' => $seconds]);
+
+        return $this;
+    }
+
+    /**
+     * Leave the first seconds unencrypted, so playback can start before the key is fetched.
+     */
+    public function withClearLead(float $seconds): static
+    {
+        $this->encryption = $this->encryptionOrNew()->with(['clearLead' => $seconds]);
+
+        return $this;
+    }
+
+    /**
+     * The key the segments will be encrypted with, if encryption is enabled.
+     */
+    public function encryptionKey(): ?EncryptionKey
+    {
+        return $this->encryption?->key;
+    }
+
+    /**
      * Set an option the package has no method for, passed to the driver as is,
      * e.g. withOption('hls_base_url', 'https://cdn.test/') for Shaka.
      */
@@ -271,6 +331,7 @@ class Builder
             allowCodecSwitching: $this->allowCodecSwitching,
             approximateSegmentTimeline: $this->approximateSegmentTimeline,
             options: $this->options,
+            encryption: $this->encryption,
         );
     }
 
@@ -325,6 +386,10 @@ class Builder
 
             $this->packager()->package($spec, $output, $this->timeout);
 
+            if ($spec->encryption?->keyFile !== null) {
+                $output->put($spec->encryption->keyFile, $spec->encryption->key->binary());
+            }
+
             $written = $this->exporter->export($output->path(), $this->disk(), $directory, $this->visibility, move: true);
         } finally {
             $output->delete();
@@ -335,7 +400,7 @@ class Builder
         return new ExportResult($this->disk(), array_values(array_unique([
             ...array_intersect($manifests, $written),
             ...$written,
-        ])));
+        ])), $spec->encryption?->key);
     }
 
     /**
@@ -358,6 +423,11 @@ class Builder
         }
 
         return $this->opener->makeMedia($this->opener->disk(), $path);
+    }
+
+    protected function encryptionOrNew(): Encryption
+    {
+        return $this->encryption ?? new Encryption(EncryptionKey::generate());
     }
 
     protected function defaultOutput(StreamType $type): string

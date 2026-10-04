@@ -27,6 +27,7 @@ final readonly class PackagingSpec
         public bool $allowCodecSwitching = false,
         public bool $approximateSegmentTimeline = false,
         public array $options = [],
+        public ?Encryption $encryption = null,
     ) {}
 
     /**
