@@ -58,6 +58,8 @@ class Thumbnails
 
     protected ?Tonemap $toneMap;
 
+    protected bool $keyframesOnly = false;
+
     public function __construct(protected Opener $opener)
     {
         $this->toneMap = new Tonemap;
@@ -71,6 +73,18 @@ class Thumbnails
     public function toneMap(?Tonemap $toneMap): static
     {
         $this->toneMap = $toneMap;
+
+        return $this;
+    }
+
+    /**
+     * Decode only the keyframes, which is often 10 to 50 times faster on long videos. Each
+     * thumbnail then shows the last keyframe at or before its time, so when keyframes are further
+     * apart than the interval, neighbouring thumbnails can repeat.
+     */
+    public function keyframesOnly(bool $keyframesOnly = true): static
+    {
+        $this->keyframesOnly = $keyframesOnly;
 
         return $this;
     }
@@ -214,6 +228,7 @@ class Thumbnails
         $sheets = (int) ceil($count / ($this->columns * $this->rows));
 
         $exported = $this->opener->ffmpeg()
+            ->when($this->keyframesOnly, fn (FFMpegBuilder $builder) => $builder->addInputArgs(['-skip_frame', 'nokey']))
             ->map('0:v:0')
             ->addFilter(...array_values(array_filter([
                 Custom::video('fps=1/'.Number::format($interval)),
