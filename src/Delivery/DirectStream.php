@@ -27,9 +27,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class DirectStream
 {
-    /** Video and audio codecs MPEG-TS segments can carry without re-encoding. */
-    protected const array STREAMABLE_CODECS = ['h264', 'hevc', 'aac', 'mp3', 'ac3', 'eac3'];
-
     protected ?float $segmentDuration = null;
 
     protected ?Disk $cacheDisk = null;
@@ -238,7 +235,7 @@ class DirectStream
         $probe = $this->opener->probe($media->path());
 
         foreach ([$probe->videoStream(), $probe->audioStream()] as $stream) {
-            if ($stream !== null && ! in_array($stream->codecName, self::STREAMABLE_CODECS, true)) {
+            if ($stream !== null && ! TransportStreamCodec::supports($stream->codecName)) {
                 throw InvalidMediaException::notStreamable($media->path(), (string) $stream->codecName);
             }
         }
