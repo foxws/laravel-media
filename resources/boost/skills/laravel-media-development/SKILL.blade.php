@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -142,6 +142,30 @@ Event::listen(function (ProgressReported $event) {
 - Progress is requested from ffmpeg as soon as there's a progress callback or a `ProgressReported` listener, so listening alone is enough.
 - `thumbnails()` dispatches `ExportCompleted` for its sprite sheets, then writes the VTT file.
 
+## Validating uploads
+
+`Foxws\Media\Rules\MediaFile` probes the uploaded file with ffprobe, so validation relies on what the file really contains rather than its extension or MIME type.
+
+@boostsnippet("Upload validation", "php")
+use Foxws\Media\Rules\MediaFile;
+
+$request->validate([
+    'video' => ['required', 'file', 'max:2097152', MediaFile::video()
+        ->withAudio()
+        ->minDuration(1)
+        ->maxDuration(3600)
+        ->minDimensions(640, 360)
+        ->maxDimensions(3840, 2160)
+        ->videoCodecs(['h264', 'hevc', 'av1', 'vp9'])
+        ->audioCodecs(['aac', 'opus', 'mp3'])],
+    'podcast' => ['required', 'file', MediaFile::audio()->maxDuration(7200)],
+    'anything' => ['required', 'file', MediaFile::any()],
+]);
+@endboostsnippet
+
+- Files ffprobe can't read, and values that aren't files, fail with "The :attribute must be a readable media file."
+- Codec names are ffprobe's (`h264`, `hevc`, `av1`, `vp9`, `aac`, `opus`, ...). Keep the `file`/`max` rules too, so oversized uploads are rejected before probing.
+
 ## Several outputs in one run
 
 `addOutput($path, fn (Output $output) => ...)` writes another file from the same ffmpeg run. Each output has its own `map()`, `inFormat()`, `addFilter()` and `addArgs()`. The inputs are read and decoded once, which is much faster than one run per file.
@@ -263,7 +287,7 @@ Failed copies throw `ExportFailedException`, whose `failures` property lists eac
 
 ## Executables
 
-Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. A missing one throws `ExecutableNotFoundException`, which names the env key to set.
+Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set.
 
 ## Configuration
 
@@ -352,7 +376,7 @@ Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('libx264'
 Media::assertNotRan(Executable::Packager);
 @endboostsnippet
 
-- Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
+- Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
 - `Media::fake()->failNext(Executable::FFMpeg, 'Invalid data found')` makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
 - `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
 - Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.

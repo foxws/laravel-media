@@ -32,7 +32,8 @@ class MediaFake extends MediaFactory
     public function __construct(protected array $probes = []) {}
 
     /**
-     * Fake ffprobe output for media whose path ends with the given path.
+     * Fake ffprobe output for media whose path ends with the given path, or "*" for any media,
+     * e.g. uploads, which have random temporary names.
      *
      * @param  array<string, mixed>  $probe
      */
@@ -213,7 +214,7 @@ class MediaFake extends MediaFactory
     {
         $input = str_replace('\\', '/', strtok($input, '?') ?: $input);
 
-        return $input === $path || str_ends_with($input, '/'.ltrim($path, '/'));
+        return $path === '*' || $input === $path || str_ends_with($input, '/'.ltrim($path, '/'));
     }
 
     protected function defaultDisk(): string

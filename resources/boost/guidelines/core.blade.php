@@ -3,7 +3,7 @@
 This application uses `foxws/laravel-media` to probe and process audio and video with ffprobe and ffmpeg on any Laravel disk.
 
 - Use the `Foxws\Media\Facades\Media` facade (`Media::fromDisk($disk)->open($path)`). Don't add pbmedia/laravel-ffmpeg or php-ffmpeg, and don't shell out to ffmpeg or ffprobe directly.
-- Read stream, format and chapter details from `->probe()` instead of parsing ffprobe output yourself.
+- Read stream, format and chapter details from `->probe()` instead of parsing ffprobe output yourself, and validate uploads with the `Foxws\Media\Rules\MediaFile` rule rather than trusting extensions or MIME types.
 - Use the filter classes in `Foxws\Media\Filters` with `addFilter()` (or `Custom::video()`/`Custom::audio()`) instead of raw `-vf`/`-af` arguments, and pass other ffmpeg options the package has no method for through `addArgs()`/`addInputArgs()` rather than building a separate command.
 - Temporary files are cleaned up after every queue job automatically; schedule `media:clean` hourly for leftovers of crashed workers, and use Laravel's `WithoutOverlapping` middleware for jobs that must not process the same media at once.
 - Catch `ProcessFailedException` in jobs and use `isRetryable()` to decide between `release()` and `fail()`; give long encodes a `->timeout()` below the job's `$timeout`.

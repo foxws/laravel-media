@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Queue\Job;
@@ -9,6 +10,7 @@ use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
+use Illuminate\Support\Facades\Artisan;
 
 it('deletes temporary directories after every queue job', function (Closure $event) {
     $directory = app(TemporaryDirectories::class)->create();
@@ -43,3 +45,24 @@ it('stops running processes and cleans up before a timed out or stopping worker 
     'timed out' => [fn () => new JobTimedOut('redis', Mockery::mock(Job::class), 60)],
     'stopping' => [fn () => new WorkerStopping],
 ]);
+
+it('adds a media section to php artisan about', function () {
+    $ffmpeg = fakeExecutable(Executable::FFMpeg);
+    config([
+        'media.disk' => 'media',
+        'media.timeout' => 600,
+        'media.executables.packager' => 'laravel-media-missing-packager',
+    ]);
+
+    Artisan::call('about', ['--only' => 'media', '--json' => true]);
+
+    $about = json_decode(Artisan::output(), true)['media'] ?? [];
+
+    expect($about)->toMatchArray([
+        'disk' => 'media',
+        'temporary_files' => config('media.temporary_files.root'),
+        'timeout' => '600s',
+        'ffmpeg' => $ffmpeg,
+        'packager' => 'not found',
+    ]);
+});
