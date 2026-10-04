@@ -14,6 +14,7 @@ use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filters\Custom;
 use Foxws\Media\Filters\Number;
 use Foxws\Media\Filters\Scale;
+use Foxws\Media\Filters\Tonemap;
 use Foxws\Media\Opener;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use InvalidArgumentException;
@@ -51,7 +52,24 @@ class Thumbnails
 
     protected ?Closure $urlResolver = null;
 
-    public function __construct(protected Opener $opener) {}
+    protected ?Tonemap $toneMap;
+
+    public function __construct(protected Opener $opener)
+    {
+        $this->toneMap = new Tonemap;
+    }
+
+    /**
+     * HDR videos are tone mapped to SDR by default, so thumbnails aren't washed out. Only the
+     * sampled frames are tone mapped, which is much cheaper than mapping the whole video.
+     * Pass another tone map to change the algorithm, or null to keep the source colours.
+     */
+    public function toneMap(?Tonemap $toneMap): static
+    {
+        $this->toneMap = $toneMap;
+
+        return $this;
+    }
 
     /**
      * Take a thumbnail every given number of seconds.
@@ -183,11 +201,12 @@ class Thumbnails
 
         $exported = $this->opener->ffmpeg()
             ->map('0:v:0')
-            ->addFilter(
+            ->addFilter(...array_values(array_filter([
                 Custom::video('fps=1/'.Number::format($interval)),
+                $probe->videoStream()?->isHdr() === true ? $this->toneMap : null,
                 Scale::fit($this->width, $this->height),
                 Custom::video("tile={$this->columns}x{$this->rows}"),
-            )
+            ])))
             ->inFormat($this->sheetFormat($sheets))
             ->toDisk($this->disk())
             ->when($this->visibility !== null, fn (Builder $builder) => $builder->withVisibility((string) $this->visibility))

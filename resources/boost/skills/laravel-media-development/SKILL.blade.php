@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, progress reporting, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, progress reporting, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -186,6 +186,26 @@ $media->ffmpeg()
   - `new Fps(30)`, `Fade::in()`/`out()`
 - **Audio filters:** `Fade::audioIn()`/`audioOut()`, `Volume::times(0.5)`/`decibels(-6)`, `new Loudnorm(-16, -1.5, 11)`.
 - `Custom::video('hqdn3d')` or `Custom::audio('atempo=1.25')` covers any other filter.
+
+### HDR to SDR
+
+HDR video (PQ/HDR10 or HLG) looks washed out when encoded as regular SDR H.264 or turned into images. `$probe->videoStream()->isHdr()` detects it, and `colorTransfer`, `colorPrimaries` and `colorSpace` are available too.
+
+@boostsnippet("Tone mapping", "php")
+use Foxws\Media\Filters\{Tonemap, ToneMapAlgorithm};
+
+$media->ffmpeg()
+    ->toneMap()                                               // only applied when the source is HDR
+    ->addFilter(Scale::to(1280))
+    ->inFormat(Format::h264())
+    ->save('sdr.mp4');
+
+$media->ffmpeg()->toneMap(new Tonemap(ToneMapAlgorithm::Mobius, desaturation: 0.5));
+@endboostsnippet
+
+- `toneMap()` is safe to always call for files of unknown origin. It goes first in the video chain, works inside watermark graphs, and in `clips()` only maps the clips whose file is HDR.
+- `thumbnails()` tone maps HDR by default, and only the sampled frames, so it stays cheap. Call `->toneMap(null)` to keep the source colours.
+- It uses zscale, so ffmpeg needs libzimg. Most static and distribution builds have it, and `ffmpeg -filters | grep zscale` checks.
 - Without a watermark, filters become `-vf`/`-af`. A watermark switches to `-filter_complex` with mapped outputs, so it can't be combined with `map()` (that throws `InvalidFilterException`). The watermark is read from the source disk unless another disk is given.
 
 ## Formats

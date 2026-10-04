@@ -24,6 +24,9 @@ readonly class VideoStream extends Stream
         public ?float $frameRate,
         public ?string $pixelFormat,
         public bool $attachedPicture,
+        public ?string $colorTransfer = null,
+        public ?string $colorPrimaries = null,
+        public ?string $colorSpace = null,
     ) {
         parent::__construct($index, $codecType, $codecName, $duration, $bitRate, $language, $tags, $raw);
     }
@@ -40,7 +43,19 @@ readonly class VideoStream extends Stream
             frameRate: static::rate($stream['avg_frame_rate'] ?? null) ?? static::rate($stream['r_frame_rate'] ?? null),
             pixelFormat: isset($stream['pix_fmt']) ? (string) $stream['pix_fmt'] : null,
             attachedPicture: (int) data_get($stream, 'disposition.attached_pic', 0) === 1,
+            colorTransfer: isset($stream['color_transfer']) ? (string) $stream['color_transfer'] : null,
+            colorPrimaries: isset($stream['color_primaries']) ? (string) $stream['color_primaries'] : null,
+            colorSpace: isset($stream['color_space']) ? (string) $stream['color_space'] : null,
         );
+    }
+
+    /**
+     * Whether the video is HDR, using the PQ (HDR10, Dolby Vision) or HLG transfer function.
+     * HDR video looks washed out when encoded as SDR without tone mapping.
+     */
+    public function isHdr(): bool
+    {
+        return in_array($this->colorTransfer, ['smpte2084', 'arib-std-b67'], true);
     }
 
     /**

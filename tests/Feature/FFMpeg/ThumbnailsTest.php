@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\Filters\Tonemap;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -12,15 +13,15 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Fake ffprobe with a video of the given duration, and ffmpeg writing the number of sheets it was asked for.
  */
-function fakeThumbnailProcesses(float $duration, bool $video = true): void
+function fakeThumbnailProcesses(float $duration, bool $video = true, ?string $transfer = null): void
 {
     fakeExecutable(Executable::FFProbe);
     fakeExecutable(Executable::FFMpeg);
 
-    Process::fake(['*' => function (PendingProcess $process) use ($duration, $video) {
+    Process::fake(['*' => function (PendingProcess $process) use ($duration, $video, $transfer) {
         if (runs($process, Executable::FFProbe)) {
             return Process::result(output: json_encode([
-                'streams' => $video ? [['index' => 0, 'codec_type' => 'video', 'codec_name' => 'h264']] : [],
+                'streams' => $video ? [['index' => 0, 'codec_type' => 'video', 'codec_name' => 'h264', 'color_transfer' => $transfer]] : [],
                 'format' => ['duration' => (string) $duration],
             ]));
         }
@@ -146,4 +147,20 @@ it('reports the progress of sampling', function () {
         ->save('storyboard');
 
     Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && array_slice($process->command, 1, 3) === ['-progress', 'pipe:1', '-nostats']);
+});
+
+it('tone maps hdr videos by default, unless turned off', function () {
+    fakeThumbnailProcesses(duration: 25, transfer: 'smpte2084');
+    Storage::fake('videos');
+    $opener = Media::fromDisk('videos')->open('video.mp4');
+
+    $opener->thumbnails()->every(10)->save('mapped');
+    $opener->thumbnails()->every(10)->toneMap(null)->save('original');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
+        && str_ends_with(end($process->command), 'mapped_%03d.jpg')
+        && str_starts_with($process->command[array_search('-vf', $process->command, true) + 1], 'fps=1/10,'.new Tonemap.','));
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
+        && str_ends_with(end($process->command), 'original_%03d.jpg')
+        && ! str_contains($process->command[array_search('-vf', $process->command, true) + 1], 'tonemap'));
 });

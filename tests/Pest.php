@@ -136,11 +136,11 @@ function fakeProbes(array $probes, string $ffmpegOutput = ''): void
  *
  * @return array<string, mixed>
  */
-function videoProbe(int $width = 1920, int $height = 1080, bool $audio = true, string $codec = 'h264', float $duration = 60): array
+function videoProbe(int $width = 1920, int $height = 1080, bool $audio = true, string $codec = 'h264', float $duration = 60, ?string $transfer = null): array
 {
     return [
         'streams' => array_values(array_filter([
-            ['index' => 0, 'codec_type' => 'video', 'codec_name' => $codec, 'width' => $width, 'height' => $height],
+            ['index' => 0, 'codec_type' => 'video', 'codec_name' => $codec, 'width' => $width, 'height' => $height, ...($transfer !== null ? ['color_transfer' => $transfer, 'color_primaries' => 'bt2020'] : [])],
             $audio ? ['index' => 1, 'codec_type' => 'audio', 'codec_name' => 'aac', 'sample_rate' => '48000', 'channels' => 2] : null,
         ])),
         'format' => ['duration' => (string) $duration],

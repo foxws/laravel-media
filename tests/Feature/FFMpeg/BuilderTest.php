@@ -16,6 +16,8 @@ use Foxws\Media\Filters\Fade;
 use Foxws\Media\Filters\Loudnorm;
 use Foxws\Media\Filters\Position;
 use Foxws\Media\Filters\Scale;
+use Foxws\Media\Filters\Tonemap;
+use Foxws\Media\Filters\ToneMapAlgorithm;
 use Foxws\Media\Filters\Volume;
 use Foxws\Media\Process\Progress;
 use Illuminate\Process\PendingProcess;
@@ -455,4 +457,38 @@ it('reports both passes of a two-pass encode as one percentage', function () {
         ->save('out.mp4');
 
     expect($percentages)->toBe([25.0, 75.0]);
+});
+
+it('tone maps an hdr source before the other video filters', function () {
+    fakeProbes(['video.mp4' => videoProbe(transfer: 'smpte2084')]);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->toneMap()
+        ->addFilter(Scale::to(1280))
+        ->arguments('out.mp4');
+
+    expect($arguments[array_search('-vf', $arguments, true) + 1])->toBe((new Tonemap).',scale=1280:-2');
+});
+
+it('leaves an sdr source alone when tone mapping is asked for', function () {
+    fakeProbes(['video.mp4' => videoProbe(transfer: 'bt709')]);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->toneMap()->arguments('out.mp4');
+
+    expect($arguments)->not->toContain('-vf');
+});
+
+it('tone maps inside the watermark graph', function () {
+    fakeProbes(['video.mp4' => videoProbe(transfer: 'arib-std-b67')]);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->toneMap(new Tonemap(ToneMapAlgorithm::Mobius))
+        ->watermark('logo.png')
+        ->arguments('out.mp4');
+
+    expect($arguments[array_search('-filter_complex', $arguments, true) + 1])
+        ->toStartWith('[0:v]'.new Tonemap(ToneMapAlgorithm::Mobius).'[base];');
 });

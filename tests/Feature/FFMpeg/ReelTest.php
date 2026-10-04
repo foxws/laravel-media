@@ -9,6 +9,7 @@ use Foxws\Media\Facades\Media;
 use Foxws\Media\FFMpeg\Clip;
 use Foxws\Media\Filters\Fade;
 use Foxws\Media\Filters\Loudnorm;
+use Foxws\Media\Filters\Tonemap;
 use Illuminate\Support\Facades\Storage;
 
 it('joins clips of one file with accurate seeks on separate inputs', function () {
@@ -93,3 +94,18 @@ it('needs at least one clip', function () {
 
     Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->clips([]);
 })->throws(InvalidMediaException::class, 'at least one clip');
+
+it('tone maps only the clips that come from hdr files', function () {
+    fakeProbes(['hdr.mp4' => videoProbe(transfer: 'smpte2084'), 'sdr.mp4' => videoProbe()]);
+    Storage::fake('videos');
+
+    $arguments = Media::fromDisk('videos')->open(['hdr.mp4', 'sdr.mp4'])->ffmpeg()
+        ->clips([Clip::make(0, 2), Clip::make(0, 2, 'sdr.mp4')], width: 1920, height: 1080)
+        ->toneMap()
+        ->arguments('reel.mp4');
+
+    $graph = $arguments[array_search('-filter_complex', $arguments, true) + 1];
+
+    expect($graph)->toContain('[0:v:0]setpts=PTS-STARTPTS,'.new Tonemap.',scale=1920:1080')
+        ->toContain('[1:v:0]setpts=PTS-STARTPTS,scale=1920:1080');
+});
