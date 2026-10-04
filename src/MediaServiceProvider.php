@@ -6,6 +6,7 @@ namespace Foxws\Media;
 
 use Foxws\Media\Commands\CleanCommand;
 use Foxws\Media\Commands\InfoCommand;
+use Foxws\Media\Executables\Executable;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
@@ -13,6 +14,7 @@ use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Probe\Prober;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobTimedOut;
@@ -74,9 +76,36 @@ class MediaServiceProvider extends ServiceProvider
             InfoCommand::class,
         ]);
 
+        AboutCommand::add('Media', fn (): array => $this->aboutSection());
+
         $this->publishes([
             __DIR__.'/../config/media.php' => config_path('media.php'),
         ], ['media', 'media-config']);
+    }
+
+    /**
+     * The "Media" section of "php artisan about": where media is read and written, and which executables were found.
+     *
+     * @return array<string, string>
+     */
+    protected function aboutSection(): array
+    {
+        $executables = $this->app->make(Executables::class);
+        $disk = Config::get('media.disk');
+
+        $section = [
+            'Disk' => is_string($disk) && $disk !== '' ? $disk : Config::string('filesystems.default'),
+            'Temporary files' => Config::string('media.temporary_files.root'),
+            'Timeout' => Config::integer('media.timeout', 14400).'s',
+        ];
+
+        foreach (Executable::cases() as $executable) {
+            $section[ucfirst($executable->value)] = $executables->available($executable)
+                ? $executables->path($executable)
+                : 'not found';
+        }
+
+        return $section;
     }
 
     /**

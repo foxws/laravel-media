@@ -159,3 +159,10 @@ it('cancels from a progress callback like a real run', function () {
     expect($save)->toThrow(fn (ProcessFailedException $exception) => expect($exception->reason)->toBe(FailureReason::Cancelled));
     Media::assertNotSaved('out.mp4', 'media');
 });
+
+it('fakes the probe of any media with a wildcard', function () {
+    Media::fake(['*' => FakeProbe::audio(duration: 30)]);
+    Storage::fake('media');
+
+    expect(Media::fromDisk('media')->open('uploads/random-name')->probe()->hasVideo())->toBeFalse();
+});
