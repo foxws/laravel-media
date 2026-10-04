@@ -644,3 +644,13 @@ it('adds the markers to the dash manifest as an event stream per class', functio
         '    <AdaptationSet id="0"',
     ]));
 });
+
+it('probes each file once across requests', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    Storage::disk('videos')->put('video.mp4', 'video');
+
+    Media::fromDisk('videos')->open('video.mp4')->stream()->masterPlaylist(fn () => 'playlist');
+    Media::fromDisk('videos')->open('video.mp4')->stream()->mediaPlaylist(0, fn (Segment $segment) => "{$segment->index}.ts");
+
+    Media::assertRanTimes(Executable::FFProbe, 2);
+});
