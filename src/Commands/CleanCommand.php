@@ -32,7 +32,7 @@ class CleanCommand extends Command
         $deleted = 0;
 
         foreach ($this->roots() as $root) {
-            foreach ($filesystem->directories($root) as $directory) {
+            foreach (array_map(fn (string $directory): string => str_replace('\\', '/', $directory), $filesystem->directories($root)) as $directory) {
                 if (preg_match('/^[0-9a-f]{16}$/', basename($directory)) !== 1 || $this->lastModified($directory) > $cutoff) {
                     continue;
                 }

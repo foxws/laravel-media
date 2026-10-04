@@ -11,10 +11,9 @@ use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
-use Illuminate\Contracts\Process\InvokedProcess;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\FakeInvokedProcess;
-use Illuminate\Process\InvokedProcess as ConcreteInvokedProcess;
+use Illuminate\Process\InvokedProcess;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Psr\Log\LoggerInterface;
@@ -30,7 +29,7 @@ class Runner
      */
     protected const array SENSITIVE_OPTIONS = ['keys', 'key', 'key_id', 'pssh', 'protection_systems', 'raw_key', 'iv', 'decryption_key'];
 
-    /** @var array<int, InvokedProcess> */
+    /** @var array<int, \Illuminate\Contracts\Process\InvokedProcess> */
     protected array $running = [];
 
     public function __construct(
@@ -147,7 +146,7 @@ class Runner
                 continue;
             }
 
-            if ($process instanceof ConcreteInvokedProcess || $process instanceof FakeInvokedProcess) {
+            if ($process instanceof InvokedProcess || $process instanceof FakeInvokedProcess) {
                 $process->stop($timeout);
             } else {
                 $process->signal(15);
