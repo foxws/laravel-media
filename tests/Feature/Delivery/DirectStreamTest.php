@@ -432,7 +432,10 @@ it('names the key and the clearkey license url in the dash manifest', function (
     $key = EncryptionKey::generate();
     $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption($key, fn () => 'key');
 
-    expect(fn () => $stream->dashManifest(fn () => 'init', fn () => 'segment'))->toThrow(InvalidArgumentException::class, 'need a license URL');
+    $withoutLicense = simplexml_load_string($stream->dashManifest(fn () => 'init', fn () => 'segment'));
+
+    expect((string) $withoutLicense->Period->AdaptationSet[0]->ContentProtection[1]['value'])->toBe('ClearKey1.0')
+        ->and($withoutLicense->Period->AdaptationSet[0]->ContentProtection[1]->children('https://dashif.org/CPS')->Laurl)->toHaveCount(0);
 
     $manifest = simplexml_load_string($stream->licenseUrlUsing(fn () => 'license.json?a=1&b=2')->dashManifest(fn () => 'init', fn () => 'segment'));
 
@@ -877,4 +880,45 @@ it('queues the first segments of every dash track', function () {
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Video && $job->segments === [0, 1]);
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '720.mp4' && $job->track === Track::Video);
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Audio);
+});
+
+it('picks the variants that give the video tracks and the shared audio track', function () {
+    Media::fake([
+        '1080.mp4' => FakeProbe::video(duration: 13),
+        'dub.mp4' => FakeProbe::video(duration: 13, width: 640, height: 360),
+    ]);
+    $stream = Media::fromDisk('videos')->open(['1080.mp4', 'dub.mp4'])->stream()->fragmented()->tracksFrom([0], 1);
+
+    $playlist = $stream->masterPlaylist(fn (int $variant, ?Track $track) => "{$variant}/{$track?->value}.m3u8");
+
+    expect($playlist)->toContain('URI="1/audio.m3u8"', "\n0/video.m3u8")
+        ->not->toContain('1/video.m3u8');
+});
+
+it('returns the bytes of segments and initialization segments, encrypted when the stream is', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $key = EncryptionKey::generate();
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(0);
+    $samples = ['sample'];
+    $fragments = cacheFragmentedTrack($stream, 1, Track::Audio, 'mp4a', $samples);
+    $plain = Storage::disk('segments')->get($stream->segment(0, 0));
+
+    expect($stream->segmentContents(0, 1, Track::Audio))->toBe($fragments['media'])
+        ->and($stream->initSegmentContents(0, Track::Audio))->toBe($fragments['init'])
+        ->and($stream->segmentContents(0, 0))->toBe($plain);
+
+    $stream->withEncryption($key, fn () => 'key');
+
+    expect(decryptCenc($stream->segmentContents(0, 1, Track::Audio), $key)['samples'])->toBe($samples)
+        ->and($stream->initSegmentContents(0, Track::Audio))->toBe(CommonEncryption::init($fragments['init'], $key))
+        ->and(openssl_decrypt($stream->segmentContents(0, 0), 'aes-128-cbc', $key->binary(), OPENSSL_RAW_DATA, str_repeat("\0", 16)))->toBe($plain);
+});
+
+it('returns subtitle contents with or without a timestamp map', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    Storage::disk('videos')->put('nld.vtt', "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHallo\n");
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withSubtitles('nld.vtt', 'nld');
+
+    expect($stream->subtitleContents(0))->toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHallo\n")
+        ->and($stream->subtitleContents(0, 10))->toStartWith("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n");
 });

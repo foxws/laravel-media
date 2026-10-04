@@ -41,8 +41,9 @@ return [
     | Packager
     |--------------------------------------------------------------------------
     |
-    | The driver that packages encoded media into DASH and HLS. Shaka Packager
-    | is built in; register others with PackagerManager::extend().
+    | The driver that packages encoded media into DASH and HLS: "shaka" (Shaka
+    | Packager) or "native" (ffmpeg only). Register others with
+    | PackagerManager::extend().
     |
     */
 
