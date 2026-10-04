@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\MediaFactory;
+use Foxws\Media\Opener;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
@@ -87,3 +89,11 @@ it('fails when probing before any media is opened', function () {
 
     Media::fromDisk('videos')->probe();
 })->throws(MediaNotFoundException::class, 'No media has been opened.');
+
+it('takes macros, so other packages can add their own tools', function () {
+    Media::fake();
+    Opener::macro('pathCount', fn () => count($this->paths()));
+    MediaFactory::macro('openTwo', fn (string $disk) => $this->fromDisk($disk)->open(['a.mp4', 'b.mp4']));
+
+    expect(Media::openTwo('local')->pathCount())->toBe(2);
+});
