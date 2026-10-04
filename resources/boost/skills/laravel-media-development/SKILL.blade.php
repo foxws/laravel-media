@@ -61,7 +61,7 @@ $result->paths();  // every written path
 - `clip()` seeks on the input, so it applies to every output. With `Format::copy()` the clip starts at the keyframe before `from`.
 - `beforeSaving(fn ($builder) => ...)` can still change the command. `afterSaving(fn ($builder, $result) => ...)` runs once, only after the files are on the target disk.
 - `command('out.mp4')` returns the full command line with keys redacted, without running it.
-- Call `$media->cleanupTemporaryFiles()` in `finally` when remote inputs were downloaded, because queue workers are long-lived.
+- Temporary files, including downloaded remote inputs, are deleted after every queue job and at the end of each request. Call `$media->cleanupTemporaryFiles()` to free them earlier, for example between steps of a long job.
 
 ## Scenes, clips and reels
 
@@ -253,7 +253,9 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `remote_inputs.enabled`, `.url_lifetime` | Read remote disks through signed URLs |
 | `temporary_files.root`, `.cache_root` | Where downloads and outputs are written; the cache root is for small files (e.g. `/dev/shm`) |
 | `temporary_files.min_free`, `.size_multiplier`, `.cache_min_free` | Fail fast with `InsufficientStorageException` when a root is too full |
+| `temporary_files.cleanup_after_jobs` | Delete temporary directories after every queue job (`MEDIA_CLEANUP_AFTER_JOBS`, on) |
 | `uploads.concurrency`, `.multipart_threshold`, `.multipart_part_size`, `.multipart_concurrency` | S3 upload tuning |
+| `uploads.rollback_on_failure` | Delete what an export already uploaded when another file fails (`MEDIA_UPLOADS_ROLLBACK_ON_FAILURE`, on) |
 
 ## Errors, retries and logging
 
@@ -279,6 +281,25 @@ public function handle(): void
 - Failures are logged as errors with the same context. Successful runs that still wrote to the error output are logged as warnings. Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to see why output from damaged files looks wrong.
 - **Events:** `Process\Events\ProcessStarted`, `ProcessCompleted` and `ProcessFailed` (with `$result` and `$reason`) are dispatched for every ffmpeg/ffprobe run, with the command redacted.
 - **Other exceptions** live in `Foxws\Media\Exceptions` too: `ExecutableNotFoundException`, `InvalidMediaException`, `InvalidFormatException`, `InvalidFilterException`, `ExportFailedException`, `InsufficientStorageException` and `TemporaryFileException`.
+
+## Queue jobs, crashes and cleanup
+
+- **After every job:** temporary directories are deleted when a queue job finishes or throws (`media.temporary_files.cleanup_after_jobs`, on by default), and at the end of each request.
+- **Timeouts:** when a job times out, Laravel's worker kills itself with SIGKILL. The package listens for `JobTimedOut` and `WorkerStopping` first, stops the running ffmpeg (SIGTERM, then SIGKILL) so it doesn't keep running as an orphan, and deletes the temporary directories. Still give long encodes a `->timeout()` below the job's `$timeout`, so they fail cleanly with a retryable `Timeout` instead.
+- **Crashes:** schedule `media:clean` to remove directories left behind by OOM kills, crashes or power loss. It only deletes the package's own directories (16 hex characters) that haven't been written to for longer than `--older-than` minutes (default: `media.timeout` plus an hour), so it's safe on shared mounts such as `/dev/shm`. `--dry-run` lists them.
+- **Partial exports:** when one file of an export fails to upload, the files of that export that did reach the disk are deleted (`media.uploads.rollback_on_failure`), so retries start clean.
+- **Overlapping jobs:** to stop two jobs from processing the same media at once, use Laravel's `WithoutOverlapping` job middleware, keyed by the model.
+
+@boostsnippet("Scheduling media:clean", "php")
+// routes/console.php
+Schedule::command('media:clean')->hourly();
+
+// a job that shouldn't overlap for the same video
+public function middleware(): array
+{
+    return [(new WithoutOverlapping($this->video->id))->expireAfter(7200)];
+}
+@endboostsnippet
 
 ## Testing
 

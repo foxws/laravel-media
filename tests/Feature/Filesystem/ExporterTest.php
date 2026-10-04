@@ -97,3 +97,25 @@ it('copies files and leaves the source in place without move', function () {
     expect(file_exists("{$directory}/clip.mp4"))->toBeTrue();
     Storage::disk('videos')->assertExists('clip.mp4');
 });
+
+it('deletes the files that did upload when another file of the export fails', function () {
+    config(['media.uploads.multipart_threshold' => 1024 * 1024]);
+    $commands = [];
+    recordingS3Disk($commands, failOn: 'UploadPart');
+    $directory = directoryWith(['video.mp4' => str_repeat('v', 2 * 1024 * 1024), 'master.m3u8' => '#EXTM3U']);
+
+    rescue(fn () => Exporter::make()->export($directory, Disk::make('recording-s3')), report: false);
+
+    expect(collect($commands)->where('name', 'DeleteObject')->pluck('args.Key')->all())->toBe(['segments/master.m3u8']);
+});
+
+it('keeps the uploaded files when rollback is turned off', function () {
+    config(['media.uploads.multipart_threshold' => 1024 * 1024, 'media.uploads.rollback_on_failure' => false]);
+    $commands = [];
+    recordingS3Disk($commands, failOn: 'UploadPart');
+    $directory = directoryWith(['video.mp4' => str_repeat('v', 2 * 1024 * 1024), 'master.m3u8' => '#EXTM3U']);
+
+    rescue(fn () => Exporter::make()->export($directory, Disk::make('recording-s3')), report: false);
+
+    expect(array_column($commands, 'name'))->not->toContain('DeleteObject');
+});

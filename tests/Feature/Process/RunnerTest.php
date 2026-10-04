@@ -156,3 +156,20 @@ it('logs failures with their report context and warnings of successful runs', fu
         ->and($records[1]['level'])->toBe('error')
         ->and($records[1]['context'])->toMatchArray(['reason' => 'no_space', 'retryable' => true, 'error_output' => 'No space left on device']);
 });
+
+it('stops a running process, as when a queue job times out', function () {
+    $script = sys_get_temp_dir().'/laravel-media-sleeping-ffmpeg';
+    file_put_contents($script, "#!/bin/sh\nsleep 10\n");
+    chmod($script, 0755);
+    config(['media.executables.ffmpeg' => $script]);
+    app(Executables::class)->flush();
+    $runner = Runner::make();
+    pcntl_async_signals(true);
+    pcntl_signal(SIGALRM, fn () => $runner->stopRunning(timeout: 1));
+    pcntl_alarm(1);
+    $startedAt = microtime(true);
+
+    expect(fn () => $runner->run(Executable::FFMpeg, []))->toThrow(ProcessFailedException::class);
+
+    expect(microtime(true) - $startedAt)->toBeLessThan(5);
+})->skip(! function_exists('pcntl_alarm'), 'Needs pcntl to send an alarm while the process runs.')->skipOnWindows();
