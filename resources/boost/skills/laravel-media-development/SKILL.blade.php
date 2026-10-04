@@ -261,16 +261,30 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 
 ## Testing
 
-Fake processes, and point the executable at any executable file, because resolution still checks it exists:
+Use `Media::fake()`. Nothing is executed and no ffmpeg is needed: probes return fake data, ffmpeg writes placeholder files to the (faked) target disk, and every command is recorded. Events, failures and progress behave as in production, and Laravel's `Process` facade is left alone.
 
-@boostsnippet("Testing with fakes", "php")
-config(['media.executables.ffmpeg' => '/usr/bin/env']);
-Process::fake(['*' => Process::result()]);
+@boostsnippet("Testing with Media::fake()", "php")
+use Foxws\Media\Executables\Executable;
+use Foxws\Media\Facades\Media;
+use Foxws\Media\Testing\FakeProbe;
+
 Storage::fake('videos');
+Storage::fake('clips');
 
-Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->frame(at: 1)->save('thumb.jpg');
+Media::fake([
+    'uploads/movie.mkv' => FakeProbe::video(duration: 120, subtitles: ['eng', 'nld']),   // keyed by the end of the path
+    'uploads/song.mp3' => FakeProbe::audio(duration: 200),
+])->scenes('uploads/movie.mkv', [12.5, 40.0]);                                         // fake scene changes
 
-Process::assertRan(fn ($process) => in_array('-frames:v', $process->command, true));
+CreateClip::run($video);   // the code under test
+
+Media::assertProbed('uploads/movie.mkv');
+Media::assertSaved('clips/1.mp4', 'clips');
+Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('libx264', $arguments, true));
+Media::assertNotRan(Executable::Packager);
 @endboostsnippet
 
-A faked ffmpeg writes no output file, so the export has nothing to copy. Write the file in a `Process::fake` closure (using `end($process->command)` as the path) when the test asserts the target disk.
+- Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
+- `Media::fake()->failNext(Executable::FFMpeg, 'Invalid data found')` makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
+- `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
+- Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.

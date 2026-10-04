@@ -40,7 +40,6 @@ class MediaServiceProvider extends ServiceProvider
 
         $this->app->singleton(Runner::class, fn (Application $app): Runner => new Runner(
             executables: $app->make(Executables::class),
-            events: $app->make('events'),
             logger: $this->logger($app),
             timeout: Config::integer('media.timeout', 14400),
         ));

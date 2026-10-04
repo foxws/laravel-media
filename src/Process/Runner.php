@@ -11,7 +11,7 @@ use Foxws\Media\Executables\Executables;
 use Foxws\Media\Process\Events\ProcessCompleted;
 use Foxws\Media\Process\Events\ProcessFailed;
 use Foxws\Media\Process\Events\ProcessStarted;
-use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Psr\Log\LoggerInterface;
 
@@ -28,7 +28,6 @@ class Runner
 
     public function __construct(
         protected Executables $executables,
-        protected Dispatcher $events,
         protected ?LoggerInterface $logger = null,
         protected int $timeout = 14400,
     ) {}
@@ -48,31 +47,25 @@ class Runner
 
         $redacted = $this->redact($command);
 
-        $this->events->dispatch(new ProcessStarted($executable, $redacted));
+        Event::dispatch(new ProcessStarted($executable, $redacted));
 
         $this->logger?->debug("Running {$executable->value}", ['command' => $redacted]);
 
         $startedAt = hrtime(true);
 
-        $processResult = Process::timeout($timeout ?? $this->timeout)
-            ->start($command)
-            ->wait(function (string $type, string $output) use ($onOutput): void {
-                if ($type === 'out' && $onOutput !== null) {
-                    $onOutput($output);
-                }
-            });
+        [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout ?? $this->timeout, $onOutput);
 
         $result = new Result(
             executable: $executable,
             command: $redacted,
-            exitCode: $processResult->exitCode() ?? 1,
-            output: $processResult->output(),
-            errorOutput: $processResult->errorOutput(),
+            exitCode: $exitCode,
+            output: $output,
+            errorOutput: $errorOutput,
             duration: (hrtime(true) - $startedAt) / 1e9,
         );
 
         if ($result->failed()) {
-            $this->events->dispatch(new ProcessFailed($result));
+            Event::dispatch(new ProcessFailed($result));
 
             $this->logger?->error("{$executable->value} failed", [
                 'command' => $redacted,
@@ -83,9 +76,29 @@ class Runner
             throw ProcessFailedException::for($result);
         }
 
-        $this->events->dispatch(new ProcessCompleted($result));
+        Event::dispatch(new ProcessCompleted($result));
 
         return $result;
+    }
+
+    /**
+     * Run the command and return its exit code, output and error output.
+     *
+     * @param  list<string>  $command
+     * @param  (callable(string): mixed)|null  $onOutput
+     * @return array{int, string, string}
+     */
+    protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
+    {
+        $result = Process::timeout($timeout)
+            ->start($command)
+            ->wait(function (string $type, string $output) use ($onOutput): void {
+                if ($type === 'out' && $onOutput !== null) {
+                    $onOutput($output);
+                }
+            });
+
+        return [$result->exitCode() ?? 1, $result->output(), $result->errorOutput()];
     }
 
     /**
