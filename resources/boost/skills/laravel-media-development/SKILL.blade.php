@@ -11,7 +11,7 @@ metadata:
 
 # Media with laravel-media
 
-`foxws/laravel-media` runs ffprobe and ffmpeg (and later Shaka Packager and ab-av1) on files from any Laravel disk. It builds commands directly. There is no php-ffmpeg underneath, so new ffmpeg options never wait on a package release.
+`foxws/laravel-media` runs ffprobe, ffmpeg and Shaka Packager on files from any Laravel disk, and add-on packages (laravel-shaka, laravel-streamer, laravel-ab-av1) build on it. It builds commands directly. There is no php-ffmpeg underneath, so new ffmpeg options never wait on a package release.
 
 ## Opening and probing
 
@@ -574,6 +574,30 @@ Failed copies throw `ExportFailedException`, whose `failures` property lists eac
 
 Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set.
 
+### Executables from other packages
+
+Add-on packages bring their own executables by implementing `Foxws\Media\Executables\Binary`, usually on an enum:
+
+@boostsnippet("An add-on executable", "php")
+enum AbAv1Executable: string implements Binary
+{
+    case AbAv1 = 'ab-av1';
+
+    public function identifier(): string { return $this->value; }
+    public function configuredPath(): string { return Config::string('ab-av1.executable', 'ab-av1'); }
+    public function environmentKey(): string { return 'AB_AV1_PATH'; }
+    public function versionArguments(): array { return ['--version']; }
+}
+
+// in the add-on's service provider
+$this->app->make(Executables::class)->register(AbAv1Executable::AbAv1);   // lists it in media:info and about
+Opener::macro('abAv1', fn () => new AbAv1Builder($this));                 // $opener->abAv1()
+@endboostsnippet
+
+- `Runner::run($binary, $arguments, environment: ['SVT_LOG' => '1'])` runs it with progress, cancelling, events, logging and redacted keys, like ffmpeg.
+- `Opener` and `MediaFactory` take macros, and the `Media` facade forwards `MediaFactory` macros.
+- In tests, `Media::fake()->respondUsing(AbAv1Executable::AbAv1, fn (array $arguments) => '...')` fakes its output, and the usual assertions accept any `Binary`.
+
 ## Configuration
 
 Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}`.
@@ -582,7 +606,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | --- | --- |
 | `disk` | Default disk for `Media::open()` (`MEDIA_DISK`) |
 | `packager.default` | Packager driver (`MEDIA_PACKAGER`, `shaka`) |
-| `executables.ffmpeg`, `.ffprobe`, `.packager`, `.ab-av1` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
+| `executables.ffmpeg`, `.ffprobe`, `.packager` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `delivery.segment_duration`, `.cache_store`, `.index_lifetime` | Segment length and keyframe index caching for streaming from stored files |
 | `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served (`media:prune` trims the cache) |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
@@ -667,5 +691,6 @@ Media::assertNotRan(Executable::Packager);
 
 - Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
 - `Media::fake()->failNext(Executable::FFMpeg, 'Invalid data found')` makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
+- `Media::fake()->respondUsing($binary, fn (array $arguments) => $output)` fakes the output of an add-on's executable; without it, add-on executables run as successful with no output.
 - `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
 - Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.
