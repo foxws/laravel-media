@@ -34,6 +34,15 @@ class Runner
     /** @var array<int, \Illuminate\Contracts\Process\InvokedProcess> */
     protected array $running = [];
 
+    /**
+     * Runs whose output is still passed on, keyed by run; removed when a run is being stopped.
+     *
+     * @var array<int, true>
+     */
+    protected array $streaming = [];
+
+    protected int $runs = 0;
+
     public function __construct(
         protected Executables $executables,
         protected ?LoggerInterface $logger = null,
@@ -124,25 +133,29 @@ class Runner
      */
     protected function execute(Executable $executable, array $command, int $timeout, ?callable $onOutput): array
     {
-        $process = Process::timeout($timeout)->start($command);
-        $id = spl_object_id($process);
+        $id = ++$this->runs;
+        $this->streaming[$id] = true;
+
+        // The callback goes to start(), because Symfony already reads available
+        // output when starting, which a callback passed to wait() would miss.
+        $process = Process::timeout($timeout)->start($command, function (string $type, string $output) use ($onOutput, $id): void {
+            if ($type === 'out' && $onOutput !== null && isset($this->streaming[$id])) {
+                $onOutput($output);
+            }
+        });
 
         $this->running[$id] = $process;
 
         try {
-            $result = $process->wait(function (string $type, string $output) use ($onOutput, $id): void {
-                if ($type === 'out' && $onOutput !== null && isset($this->running[$id])) {
-                    $onOutput($output);
-                }
-            });
+            $result = $process->wait();
         } catch (Throwable $exception) {
-            unset($this->running[$id]);
+            unset($this->streaming[$id]);
 
             $this->stop($process, 1.0);
 
             throw $exception;
         } finally {
-            unset($this->running[$id]);
+            unset($this->running[$id], $this->streaming[$id]);
         }
 
         return [$result->exitCode() ?? 1, $result->output(), $result->errorOutput()];

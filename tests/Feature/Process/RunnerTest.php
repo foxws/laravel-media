@@ -190,3 +190,20 @@ it('stops a running process that is cancelled from its output callback', functio
 
     expect(microtime(true) - $startedAt)->toBeLessThan(5);
 })->skipOnWindows();
+
+it('passes on output written as soon as the process starts', function () {
+    $script = sys_get_temp_dir().'/laravel-media-quick-ffmpeg';
+    file_put_contents($script, "#!/bin/sh\necho 'progress=end'\n");
+    chmod($script, 0755);
+    config(['media.executables.ffmpeg' => $script]);
+    app(Executables::class)->flush();
+    $output = '';
+
+    foreach (range(1, 5) as $run) {
+        Runner::make()->run(Executable::FFMpeg, [], onOutput: function (string $chunk) use (&$output) {
+            $output .= $chunk;
+        });
+    }
+
+    expect(substr_count($output, 'progress=end'))->toBe(5);
+})->skipOnWindows();
