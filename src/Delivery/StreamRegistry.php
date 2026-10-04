@@ -40,7 +40,8 @@ class StreamRegistry
     }
 
     /**
-     * The URL of a stream's master playlist, signed when the stream is.
+     * The URL of a stream's HLS playlist with fragmented MP4 (CMAF) segments, which DASH shares,
+     * signed when the stream is. Encrypted streams need hlsUrl().
      *
      * @param  array<string, mixed>  $parameters
      *
@@ -48,8 +49,42 @@ class StreamRegistry
      */
     public function url(string $name, array $parameters = []): string
     {
+        return $this->routeUrl($name, 'cmaf', $parameters);
+    }
+
+    /**
+     * The URL of a stream's HLS playlist with MPEG-TS segments, signed when the stream is.
+     *
+     * @param  array<string, mixed>  $parameters
+     *
+     * @throws InvalidArgumentException
+     */
+    public function hlsUrl(string $name, array $parameters = []): string
+    {
+        return $this->routeUrl($name, 'hls', $parameters);
+    }
+
+    /**
+     * The URL of a stream's DASH manifest, signed when the stream is.
+     *
+     * @param  array<string, mixed>  $parameters
+     *
+     * @throws InvalidArgumentException
+     */
+    public function dashUrl(string $name, array $parameters = []): string
+    {
+        return $this->routeUrl($name, 'dash', $parameters);
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameters
+     *
+     * @throws InvalidArgumentException
+     */
+    protected function routeUrl(string $name, string $role, array $parameters): string
+    {
         $definition = $this->definition($name);
-        $route = $this->masterRoute($name);
+        $route = $this->route($name, $role);
 
         return $definition->isSigned()
             ? URL::temporarySignedRoute($route, now()->addSeconds($definition->lifetime()), $parameters)
@@ -57,14 +92,14 @@ class StreamRegistry
     }
 
     /**
-     * The name of the stream's master playlist route, wherever Route::mediaStream() registered it.
+     * The name of one of the stream's routes, wherever Route::mediaStream() registered it.
      *
      * @throws InvalidArgumentException
      */
-    protected function masterRoute(string $name): string
+    protected function route(string $name, string $role): string
     {
         foreach ($this->router->getRoutes()->getRoutes() as $route) {
-            if (($route->defaults['mediaStream'] ?? null) === $name && str_ends_with((string) $route->getName(), '.master')) {
+            if (($route->defaults['mediaStream'] ?? null) === $name && str_ends_with((string) $route->getName(), ".{$role}")) {
                 return (string) $route->getName();
             }
         }

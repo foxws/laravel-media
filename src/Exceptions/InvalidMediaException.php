@@ -29,6 +29,16 @@ class InvalidMediaException extends RuntimeException
         return new self("{$path} can't be streamed as HLS with MPEG-TS segments without re-encoding: [{$codec}] isn't supported. Use H.264 or HEVC video with AAC, MP3 or AC-3 audio.");
     }
 
+    public static function notFragmentable(string $path, string $codec): self
+    {
+        return new self("{$path} can't be streamed with fragmented MP4 segments without re-encoding: [{$codec}] isn't supported. Use H.264, HEVC, AV1 or VP9 video with AAC, MP3, AC-3, Opus or FLAC audio.");
+    }
+
+    public static function notFragmented(): self
+    {
+        return new self('ffmpeg did not write a fragmented MP4 segment with an initialization segment.');
+    }
+
     public static function noStreams(): self
     {
         return new self('Add at least one stream to package, e.g. with addStreamsFrom().');

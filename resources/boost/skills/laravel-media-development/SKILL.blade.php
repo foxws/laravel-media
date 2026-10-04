@@ -81,9 +81,9 @@ $index->longestSegment(6);  // the HLS target duration
 
 ## Streaming straight from stored files
 
-`stream()` serves the opened files as HLS without packaging them first, like nginx-vod-module: playlists come from the keyframe index, and each segment is copied into MPEG-TS the first time it's requested, then kept on a cache disk. Store each video once, as H.264/HEVC with AAC/MP3/AC-3. Every opened file is one variant, for example renditions of one video.
+`stream()` serves the opened files as HLS or DASH without packaging them first, like nginx-vod-module: playlists come from the keyframe index, and each segment is copied into MPEG-TS (or fragmented MP4 per track) the first time it's requested, then kept on a cache disk. Store each video once, as H.264/HEVC with AAC/MP3/AC-3. Every opened file is one variant, for example renditions of one video.
 
-@boostsnippet("Direct HLS routes", "php")
+@boostsnippet("Direct stream routes", "php")
 use Foxws\Media\Facades\MediaStream;
 
 // AppServiceProvider::boot(): how a stream is resolved from its route parameters
@@ -93,15 +93,17 @@ MediaStream::define('videos', function (Video $video) {
     return Media::fromDisk('videos')->open($video->renditions());   // or ->stream()->segmentDuration(4)
 })->signed();   // optional: verify signatures and sign every URL in the playlists
 
-// routes/web.php: master.m3u8, {variant}/index.m3u8, {variant}/{segment}.ts and {variant}/keys/{period}.key
+// routes/web.php: cmaf.m3u8, hls.m3u8 and dash.mpd, with the playlists, segments and keys they link to
 Route::middleware('auth')->group(fn () => Route::mediaStream('videos/{video}', 'videos'));
 
 // the URL to give the player (signed when the stream is)
-MediaStream::url('videos', ['video' => $video]);
+MediaStream::url('videos', ['video' => $video]);       // CMAF: HLS with fragmented MP4, the segments DASH uses too
+MediaStream::dashUrl('videos', ['video' => $video]);   // DASH
+MediaStream::hlsUrl('videos', ['video' => $video]);    // HLS with MPEG-TS, e.g. for per-request encryption
 @endboostsnippet
 
 - **Resolvers:** parameters typed as a model (any `UrlRoutable`) are bound like implicit route model binding (404 when missing); other parameters are injected by the container. Return an `Opener` or a configured `DirectStream`. Authorize inside the resolver or with route middleware.
-- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.master`, `.playlist`, `.segment` and `.key`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
+- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.track-playlist`, `.init` and `.fragment`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
 - **Signed streams:** `signed($lifetime)` rejects requests without a valid signature (403) and signs every playlist, segment and key URL for `$lifetime` seconds (default `media.delivery.url_lifetime`).
 
 For full control, call the stream yourself from your own routes:
@@ -125,9 +127,19 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **Segments:** `ffmpeg -ss … -t … -copyts -c copy -f mpegts` copies each segment exactly, because segments start on keyframes. S3 sources are read through signed URLs with range requests, so only the needed bytes are fetched. Concurrent requests for the same segment package it once (`Cache::lock`).
 - **The segment cache:** `media.delivery.cache_disk` can be local storage, a mounted `/tmp` or RAM disk, or S3 (override per stream with `toCache()`). Segments are keyed by file version, so a changed file gets new segments. On disks with temporary URLs, `segmentResponse()` redirects to one valid for `media.delivery.url_lifetime` seconds; otherwise it returns the file with long cache headers.
 - **Errors:** out-of-range segments and variants throw `SegmentNotFoundException` (a 404). Files with codecs MPEG-TS can't carry (VP9, AV1, Opus, ...) throw `InvalidMediaException`.
-- **Players:** hls.js and Safari play these TS segments natively. Shaka Player needs mux.js loaded (`window.muxjs`) to transmux them.
+- **Formats:** each route picks its own segment format, so one stream definition serves all three URLs. Prefer `url()` (CMAF): one set of cached fragments serves HLS and DASH, and every player plays it natively. MPEG-TS (`hlsUrl()`) is for per-request AES-128 encryption and old devices; Shaka Player needs mux.js loaded (`window.muxjs`) to play it.
 - `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
-- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
+- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments (`.ts`, `.m4s` and `init.mp4`) packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
+
+### Fragmented MP4 and DASH
+
+- **Tracks:** fragmented segments hold one track (`Track::Video` or `Track::Audio`), as CMAF and DASH expect. Every file with video is a video representation, and the audio of the first file with audio is shared by all of them (HLS `#EXT-X-MEDIA` audio rendition, DASH audio adaptation set).
+- **HLS:** CMAF playlists are version 7 with `#EXT-X-MAP` initialization segments. Without routes, `fragmented()` switches `masterPlaylist()` and `mediaPlaylist()` from MPEG-TS to fragmented MP4.
+- **Players:** Shaka Player, hls.js, dash.js and Safari play fragmented MP4 natively, without mux.js.
+- **Codecs:** fragmented MP4 also carries AV1, VP9, Opus and FLAC. HEVC is tagged `hvc1` for Safari. AV1 gets its `av01` codec string from the probed profile, level and pixel format; VP9 has none, so players probe it themselves.
+- **DASH manifests** are static, with a `SegmentList` and millisecond `SegmentTimeline` per representation, so every segment URL can be signed. Fragments keep their source timestamps plus a fixed 10-second offset, which `presentationTimeOffset` removes again.
+- **Without routes:** `dashManifest($initUrl, $segmentUrl)`, `mediaPlaylist($variant, $segmentUrl, Track::Video, $initUrl)`, `initSegmentResponse($variant, $track)` and `segmentResponse($variant, $index, $track)`.
+- Per-request AES-128 only works with MPEG-TS: give players `hlsUrl()` for encrypted streams, because CMAF and DASH output of an encrypted stream throws. Use `exportAsDASH()` with encryption for protected DASH.
 
 ### Encrypting direct streams
 

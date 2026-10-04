@@ -15,4 +15,9 @@ class SegmentNotFoundException extends NotFoundHttpException
     {
         return new self("Segment {$segment} of variant {$variant} doesn't exist.");
     }
+
+    public static function forTrack(int $variant, string $track): self
+    {
+        return new self("Variant {$variant} has no {$track} track.");
+    }
 }

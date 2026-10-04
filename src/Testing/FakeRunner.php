@@ -59,7 +59,7 @@ class FakeRunner extends Runner
             $file = str_contains($output, '%') ? sprintf($output, 1) : $output;
 
             new Filesystem()->ensureDirectoryExists(dirname($file));
-            file_put_contents($file, 'fake media');
+            file_put_contents($file, $this->fragments($arguments) ? $this->fragmentedMp4() : 'fake media');
         }
 
         if (! in_array('-progress', $arguments, true)) {
@@ -91,6 +91,24 @@ class FakeRunner extends Runner
         }
 
         return implode("\n", $lines)."\n";
+    }
+
+    /**
+     * @param  list<string>  $arguments
+     */
+    protected function fragments(array $arguments): bool
+    {
+        return array_any($arguments, fn (string $argument): bool => str_contains($argument, 'frag_keyframe'));
+    }
+
+    /**
+     * A placeholder fragmented MP4: an initialization segment (ftyp, moov) and one fragment (moof, mdat).
+     */
+    protected function fragmentedMp4(): string
+    {
+        $box = fn (string $type, string $payload = ''): string => pack('N', 8 + strlen($payload)).$type.$payload;
+
+        return $box('ftyp', 'isom').$box('moov').$box('moof').$box('mdat', 'fake media');
     }
 
     /**

@@ -143,15 +143,20 @@ class MediaServiceProvider extends ServiceProvider
 
     /**
      * Route::mediaStream('videos/{video}', 'videos') serves a stream defined with MediaStream::define():
-     * master.m3u8, {variant}/index.m3u8, {variant}/{segment}.ts and {variant}/keys/{period}.key.
+     * cmaf.m3u8 and dash.mpd with {variant}/{track}/index.m3u8, {variant}/{track}/init.mp4 and
+     * {variant}/{track}/{segment}.m4s, and hls.m3u8 with {variant}/index.m3u8, {variant}/{segment}.ts
+     * and {variant}/keys/{period}.key.
      */
     protected function registerRouteMacro(): void
     {
         Router::macro('mediaStream', function (string $uri, string $stream): void {
             /** @var Router $this */
             $this->group(['prefix' => $uri, 'as' => "media.{$stream}."], function (Router $router) use ($stream): void {
-                $router->get('master.m3u8', [MediaStreamController::class, 'master'])
-                    ->name('master')->defaults('mediaStream', $stream);
+                $router->get('cmaf.m3u8', [MediaStreamController::class, 'cmaf'])
+                    ->name('cmaf')->defaults('mediaStream', $stream);
+
+                $router->get('hls.m3u8', [MediaStreamController::class, 'hls'])
+                    ->name('hls')->defaults('mediaStream', $stream);
 
                 $router->get('{variant}/index.m3u8', [MediaStreamController::class, 'playlist'])
                     ->name('playlist')->defaults('mediaStream', $stream)->whereNumber('variant');
@@ -161,6 +166,18 @@ class MediaServiceProvider extends ServiceProvider
 
                 $router->get('{variant}/keys/{period}.key', [MediaStreamController::class, 'key'])
                     ->name('key')->defaults('mediaStream', $stream)->whereNumber(['variant', 'period']);
+
+                $router->get('dash.mpd', [MediaStreamController::class, 'dash'])
+                    ->name('dash')->defaults('mediaStream', $stream);
+
+                $router->get('{variant}/{track}/index.m3u8', [MediaStreamController::class, 'trackPlaylist'])
+                    ->name('track-playlist')->defaults('mediaStream', $stream)->whereNumber('variant')->whereIn('track', ['video', 'audio']);
+
+                $router->get('{variant}/{track}/init.mp4', [MediaStreamController::class, 'init'])
+                    ->name('init')->defaults('mediaStream', $stream)->whereNumber('variant')->whereIn('track', ['video', 'audio']);
+
+                $router->get('{variant}/{track}/{segment}.m4s', [MediaStreamController::class, 'fragment'])
+                    ->name('fragment')->defaults('mediaStream', $stream)->whereNumber(['variant', 'segment'])->whereIn('track', ['video', 'audio']);
             });
         });
     }
