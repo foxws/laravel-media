@@ -223,10 +223,10 @@ class Thumbnails
             ])))
             ->inFormat($this->sheetFormat($sheets))
             ->toDisk($this->disk())
-            ->when($this->visibility !== null, fn (Builder $builder) => $builder->withVisibility((string) $this->visibility))
+            ->when($this->visibility !== null, fn (FFMpegBuilder $builder) => $builder->withVisibility((string) $this->visibility))
             ->withContext($this->context)
-            ->when($this->timeout !== null, fn (Builder $builder) => $builder->timeout((int) $this->timeout))
-            ->when($this->reportsProgress(), fn (Builder $builder) => $builder->onProgress($this->reportProgress(...)))
+            ->when($this->timeout !== null, fn (FFMpegBuilder $builder) => $builder->timeout((int) $this->timeout))
+            ->when($this->reportsProgress(), fn (FFMpegBuilder $builder) => $builder->onProgress($this->reportProgress(...)))
             ->save("{$name}_%03d.{$this->extension}");
 
         $sprites = array_map(fn (int $sheet): string => $this->sheetPath($name, $sheet), range(1, $sheets));

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media;
 
 use Foxws\Media\Exceptions\MediaNotFoundException;
-use Foxws\Media\FFMpeg\Builder;
+use Foxws\Media\FFMpeg\FFMpegBuilder;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\SceneDetector;
 use Foxws\Media\FFMpeg\Thumbnails;
@@ -14,7 +14,7 @@ use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Http\DynamicDASHManifest;
 use Foxws\Media\Http\DynamicHLSPlaylist;
-use Foxws\Media\Packaging\Builder as PackagingBuilder;
+use Foxws\Media\Packaging\PackagingBuilder;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -135,9 +135,9 @@ class Opener
     /**
      * Build an ffmpeg command with the opened files as inputs.
      */
-    public function ffmpeg(): Builder
+    public function ffmpeg(): FFMpegBuilder
     {
-        return app(Builder::class, ['opener' => $this]);
+        return app(FFMpegBuilder::class, ['opener' => $this]);
     }
 
     /**
