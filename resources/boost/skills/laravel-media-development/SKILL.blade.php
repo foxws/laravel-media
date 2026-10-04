@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with ClearKey encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with per-request AES-128 or ClearKey (CENC) encryption, subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, rendition ladders with hardware encoding, audio-only output, packaging into HLS and DASH with ClearKey encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with per-request AES-128 or ClearKey (CENC) encryption, subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -533,6 +533,34 @@ Format::mp3(256);                                              // audio only
 
 - Two-pass needs `bitrate()`. Unsupported codecs or a missing bitrate throw `InvalidFormatException` before ffmpeg runs. The first pass's log file never ends up on the target disk.
 - `withArguments([...])` appends raw output options. For anything else, use `new Format(container: ..., videoCodec: VideoCodec::..., audioCodec: AudioCodec::...)` with named arguments.
+
+## Rendition ladders
+
+`$opener->ladder()` encodes a video into several renditions for adaptive streaming, in one ffmpeg run with an output per rendition:
+
+@boostsnippet("A rendition ladder", "php")
+use Foxws\Media\Encoding\{HardwareAcceleration, Ladder, Rendition, VideoCodec};
+
+$result = Media::fromDisk('uploads')->open($upload)
+    ->ladder(Ladder::standard(), "videos/{$video->id}/{height}p.mp4")   // 1080p, 720p, 480p, 360p
+    ->toDisk('renditions')
+    ->onProgress(fn (Progress $progress) => ...)
+    ->save();
+
+$result->paths();   // ["videos/1/1080p.mp4", "videos/1/720p.mp4", ...]
+
+// stream them straight away, or package them
+Media::fromDisk('renditions')->open($result->paths())->stream();
+
+new Ladder([new Rendition(1440, 9000), new Rendition(720, 3000)], VideoCodec::Hevc, preset: 'slow', audioBitrate: 160);
+Ladder::standard()->codec(VideoCodec::Av1)->hardware(HardwareAcceleration::Vaapi)->keyframeInterval(4);
+@endboostsnippet
+
+- **Sizes:** a `Rendition` is the short side and the bitrates (`new Rendition(720, 2800)`; the peak defaults to 7% above, the buffer to twice the target). Portrait video is scaled on its width, so 720p means 720 pixels wide. Renditions larger than the source are skipped, and a source smaller than every rendition gets the smallest one at its own size.
+- **Switching:** keyframes are forced every `keyframeInterval` seconds (`media.delivery.segment_duration` by default) with scene-cut keyframes off, so every rendition has keyframes at the same times and direct streams cut the same segments from each.
+- **Codecs:** H.264 (default, `medium`), HEVC (tagged `hvc1`) or AV1 (SVT-AV1, preset 8, without a peak bitrate), always with AAC audio in MP4 with `+faststart`.
+- **Hardware:** `media.ladder.hardware` (`MEDIA_LADDER_HARDWARE`: `none`, `vaapi`, `nvenc` or `qsv`), or `->hardware()` per ladder, decodes, scales (`scale_vaapi`, `scale_cuda`, `scale_qsv`) and encodes (`h264_vaapi`, `hevc_nvenc`, ...) on the GPU. VAAPI uses `media.ladder.vaapi_device` (`/dev/dri/renderD128`); the container needs access to it.
+- `ladder()` returns the ffmpeg builder, so `toDisk()`, `onProgress()`, `withContext()`, `timeout()` and save callbacks work as usual. The output pattern takes `{height}` and `{bitrate}`. HDR sources aren't tone mapped.
 
 ## Exporting
 
