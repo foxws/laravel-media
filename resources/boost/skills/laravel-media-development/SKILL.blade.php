@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe and process audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -166,6 +166,33 @@ $request->validate([
 - Files ffprobe can't read, and values that aren't files, fail with "The :attribute must be a readable media file."
 - Codec names are ffprobe's (`h264`, `hevc`, `av1`, `vp9`, `aac`, `opus`, ...). Keep the `file`/`max` rules too, so oversized uploads are rejected before probing.
 
+## Packaging into HLS and DASH
+
+Packaging splits already-encoded files into streaming segments with HLS and DASH manifests. It doesn't transcode, so encode renditions first (for example with the ffmpeg builder), then package them. Shaka Packager (`packager`) is the default driver.
+
+@boostsnippet("Packaging renditions", "php")
+$result = Media::fromDisk('renditions')
+    ->open(['1080.mp4', '720.mp4', '480.mp4'])
+    ->exportAsStreams()                      // HLS (master.m3u8) and DASH (manifest.mpd) from the same segments
+    ->toDisk('streams')
+    ->withContext(['video_id' => $video->id])
+    ->save("videos/{$video->id}");
+
+$result->path();    // "videos/1/master.m3u8" (manifests come first in paths())
+@endboostsnippet
+
+- **Shortcuts:** `exportAsHLS()`, `exportAsDASH()` and `exportAsStreams()` probe every opened file, add its video and audio (named `{index}_video.mp4`/`{index}_audio.mp4`), and apply `forVod()` (VOD playlist, codec switching, approximate segment timeline).
+- **By hand:** `->package()->addVideoStream($path)`, `->addAudioStream($path, language: 'eng')`, `->addTextStream('captions/nld.vtt', 'nld.mp4', 'nld', ['dash_roles' => 'subtitle'])`. Text files can come from anywhere on the source disk. Package subtitles as `.mp4` for DASH, because a plain `.vtt` output gets no segment index and players drop it.
+- **Settings:**
+  - `withHlsPlaylist('master.m3u8', HlsPlaylistType::Vod)`, `withDashManifest('manifest.mpd')`
+  - `segmentDuration(6)`, `fragmentDuration(2)` (a fragment can't be longer than a segment)
+  - `defaultLanguage()`, `defaultTextLanguage()`, `allowCodecSwitching()`, `approximateSegmentTimeline()`
+  - `withOption('hls_base_url', 'https://cdn.test/')` passes any other Shaka option as is
+- **Shared with the ffmpeg builder:** `toDisk()`, `withVisibility()`, `timeout()`, `withContext()`, save callbacks, `ExportCompleted`/`ExportFailed` events, failure reasons, S3 uploads, rollback and `command()`.
+- **Inputs:** they're read from local copies, downloaded from remote disks when needed. Names with commas or special characters are linked under a plain name, because Shaka's stream descriptors use commas.
+- **Drivers:** `media.packager.default` (`MEDIA_PACKAGER`) picks the default. Register another with `app(PackagerManager::class)->extend('name', fn () => new MyPackager)`, implementing `Foxws\Media\Packaging\Packager`, and choose it per export with `->using('name')`.
+- **Under `Media::fake()`**, packaging writes placeholder segments and manifests.
+
 ## Several outputs in one run
 
 `addOutput($path, fn (Output $output) => ...)` writes another file from the same ffmpeg run. Each output has its own `map()`, `inFormat()`, `addFilter()` and `addArgs()`. The inputs are read and decoded once, which is much faster than one run per file.
@@ -296,6 +323,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | Key | Purpose |
 | --- | --- |
 | `disk` | Default disk for `Media::open()` (`MEDIA_DISK`) |
+| `packager.default` | Packager driver (`MEDIA_PACKAGER`, `shaka`) |
 | `executables.ffmpeg`, `.ffprobe`, `.packager`, `.ab-av1` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |

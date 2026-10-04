@@ -244,7 +244,7 @@ class Builder
      */
     public function watermark(string $path, Disk|Filesystem|string|null $disk = null, Position $position = Position::BottomRight, int $margin = 16, ?int $width = null): static
     {
-        $this->watermark = new Media($disk !== null ? Disk::make($disk) : $this->opener->disk(), $path, $this->directories);
+        $this->watermark = $this->opener->makeMedia($disk !== null ? Disk::make($disk) : $this->opener->disk(), $path);
         $this->watermarkFilter = ($width !== null ? "scale={$width}:-1," : '').'format=rgba';
         $this->watermarkFilter .= '[wm];[base][wm]overlay='.$position->overlay($margin);
 

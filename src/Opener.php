@@ -12,6 +12,7 @@ use Foxws\Media\FFMpeg\Thumbnails;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\Packaging\Builder as PackagingBuilder;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -49,10 +50,18 @@ class Opener
     public function open(string|array ...$paths): static
     {
         foreach (array_merge(...array_map(fn (string|array $path): array => (array) $path, $paths)) as $path) {
-            $this->media[$path] = new Media($this->disk, $path, $this->directories);
+            $this->media[$path] = $this->makeMedia($this->disk, $path);
         }
 
         return $this;
+    }
+
+    /**
+     * A file on any disk, set up like the opened files, e.g. a watermark image or a subtitle file.
+     */
+    public function makeMedia(Disk $disk, string $path): Media
+    {
+        return new Media($disk, $path, $this->directories);
     }
 
     /**
@@ -144,6 +153,38 @@ class Opener
             $this->probe($media->path())->duration(),
             $threshold,
         );
+    }
+
+    /**
+     * Package the opened, already-encoded files into DASH and HLS.
+     */
+    public function package(): PackagingBuilder
+    {
+        return app(PackagingBuilder::class, ['opener' => $this]);
+    }
+
+    /**
+     * Package the video and audio of every opened file into an HLS playlist (master.m3u8).
+     */
+    public function exportAsHLS(string $playlist = 'master.m3u8'): PackagingBuilder
+    {
+        return $this->package()->addStreamsFrom()->withHlsPlaylist($playlist)->forVod();
+    }
+
+    /**
+     * Package the video and audio of every opened file into a DASH manifest (manifest.mpd).
+     */
+    public function exportAsDASH(string $manifest = 'manifest.mpd'): PackagingBuilder
+    {
+        return $this->package()->addStreamsFrom()->withDashManifest($manifest)->forVod();
+    }
+
+    /**
+     * Package the video and audio of every opened file into both HLS and DASH, from the same segments.
+     */
+    public function exportAsStreams(string $playlist = 'master.m3u8', string $manifest = 'manifest.mpd'): PackagingBuilder
+    {
+        return $this->package()->addStreamsFrom()->withHlsPlaylist($playlist)->withDashManifest($manifest)->forVod();
     }
 
     /**

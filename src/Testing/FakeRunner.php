@@ -36,6 +36,7 @@ class FakeRunner extends Runner
         return match ($executable) {
             Executable::FFProbe => [0, (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
             Executable::FFMpeg => [0, $this->ffmpeg($arguments, $onOutput), ''],
+            Executable::Packager => [0, $this->packager($arguments), ''],
             default => [0, '', ''],
         };
     }
@@ -71,6 +72,24 @@ class FakeRunner extends Runner
         }
 
         return $progress;
+    }
+
+    /**
+     * Write placeholder segments and manifests for the outputs of a packager run.
+     *
+     * @param  list<string>  $arguments
+     */
+    protected function packager(array $arguments): string
+    {
+        foreach ($arguments as $argument) {
+            if (preg_match('/(?:^|,)output=([^,]+)/', $argument, $matches) === 1
+                || preg_match('/^--(?:mpd_output|hls_master_playlist_output)=(.+)$/', $argument, $matches) === 1) {
+                new Filesystem()->ensureDirectoryExists(dirname($matches[1]));
+                file_put_contents($matches[1], 'fake media');
+            }
+        }
+
+        return '';
     }
 
     /**

@@ -11,6 +11,7 @@ use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Exporter;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\Packaging\PackagerManager;
 use Foxws\Media\Probe\Prober;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Foundation\Application;
@@ -36,6 +37,7 @@ class MediaServiceProvider extends ServiceProvider
         $this->app->singleton(Exporter::class);
         $this->app->singleton(Prober::class);
         $this->app->singleton(MediaFactory::class);
+        $this->app->singleton(PackagerManager::class);
 
         $this->app->singleton(TemporaryDirectories::class, fn (): TemporaryDirectories => new TemporaryDirectories(
             root: Config::string('media.temporary_files.root', sys_get_temp_dir()),
