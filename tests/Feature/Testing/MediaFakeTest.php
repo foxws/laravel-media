@@ -166,3 +166,15 @@ it('fakes the probe of any media with a wildcard', function () {
 
     expect(Media::fromDisk('media')->open('uploads/random-name')->probe()->hasVideo())->toBeFalse();
 });
+
+it('writes placeholder segments and manifests for packaging', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('media');
+
+    $result = Media::fromDisk('media')->open('video.mp4')->exportAsStreams()->save('streams');
+
+    expect($result->path())->toBe('streams/master.m3u8');
+    Media::assertSaved('streams/manifest.mpd', 'media');
+    Media::assertSaved('streams/0_video.mp4', 'media');
+    Media::assertRan(Executable::Packager, fn (array $arguments) => in_array('--allow_codec_switching', $arguments, true));
+});

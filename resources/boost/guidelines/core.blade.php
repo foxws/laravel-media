@@ -1,6 +1,6 @@
 # Laravel Media
 
-This application uses `foxws/laravel-media` to probe and process audio and video with ffprobe and ffmpeg on any Laravel disk.
+This application uses `foxws/laravel-media` to probe, process and package audio and video with ffprobe, ffmpeg and Shaka Packager on any Laravel disk.
 
 - Use the `Foxws\Media\Facades\Media` facade (`Media::fromDisk($disk)->open($path)`). Don't add pbmedia/laravel-ffmpeg or php-ffmpeg, and don't shell out to ffmpeg or ffprobe directly.
 - Read stream, format and chapter details from `->probe()` instead of parsing ffprobe output yourself, and validate uploads with the `Foxws\Media\Rules\MediaFile` rule rather than trusting extensions or MIME types.
@@ -9,4 +9,4 @@ This application uses `foxws/laravel-media` to probe and process audio and video
 - Catch `ProcessFailedException` in jobs and use `isRetryable()` to decide between `release()` and `fail()`; give long encodes a `->timeout()` below the job's `$timeout`.
 - In tests, call `Media::fake()` (with `FakeProbe` data when needed) and `Storage::fake()` for the disks, then use `Media::assertSaved()`/`assertRan()`; never run the real executables.
 
-When probing media, extracting frames, subtitles or thumbnail sprites, detecting scenes, building reels, encoding, clipping or exporting results to disks, invoke `laravel-media-development` for detailed rules.
+When packaging into HLS or DASH, probing media, extracting frames, subtitles or thumbnail sprites, detecting scenes, building reels, encoding, clipping or exporting results to disks, invoke `laravel-media-development` for detailed rules.

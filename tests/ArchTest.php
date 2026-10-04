@@ -21,3 +21,8 @@ arch('the core does not depend on tools, encoders, packagers or delivery')
 arch('filters are plain filter graph values that any executable can use')
     ->expect('Foxws\\Media\\Filters')
     ->not->toUse(['Foxws\\Media\\FFMpeg', 'Foxws\\Media\\Process', 'Foxws\\Media\\Executables', 'Foxws\\Media\\Filesystem']);
+
+arch('packaging is described independently of any packager driver')
+    ->expect('Foxws\\Media\\Packaging')
+    ->not->toUse('Foxws\\Media\\Packaging\\Drivers')
+    ->ignoring(['Foxws\\Media\\Packaging\\Drivers', 'Foxws\\Media\\Packaging\\PackagerManager']);

@@ -24,6 +24,11 @@ class InvalidMediaException extends RuntimeException
         ));
     }
 
+    public static function noStreams(): self
+    {
+        return new self('Add at least one stream to package, e.g. with addStreamsFrom().');
+    }
+
     public static function noClips(): self
     {
         return new self('Pass at least one clip to join.');

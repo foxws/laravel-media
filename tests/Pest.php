@@ -162,3 +162,30 @@ function diskPath(string $disk, string $path = ''): string
 {
     return str_replace('\\', '/', Storage::disk($disk)->path($path));
 }
+
+/**
+ * Fake ffprobe with probe data per input file name, and Shaka Packager writing its outputs.
+ *
+ * @param  array<string, array<string, mixed>>  $probes  ffprobe output keyed by the input's file name.
+ */
+function fakePackaging(array $probes = []): void
+{
+    fakeExecutable(Executable::FFProbe);
+    fakeExecutable(Executable::Packager);
+
+    Process::fake(['*' => function (PendingProcess $process) use ($probes) {
+        if (runs($process, Executable::FFProbe)) {
+            return Process::result(output: (string) json_encode($probes[basename((string) end($process->command))] ?? videoProbe()));
+        }
+
+        foreach ($process->command as $argument) {
+            if (preg_match('/(?:^|,)output=([^,]+)/', $argument, $matches) === 1
+                || preg_match('/^--(?:mpd_output|hls_master_playlist_output)=(.+)$/', $argument, $matches) === 1) {
+                @mkdir(dirname($matches[1]), 0777, true);
+                file_put_contents($matches[1], 'packaged');
+            }
+        }
+
+        return Process::result();
+    }]);
+}
