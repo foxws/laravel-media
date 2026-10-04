@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS straight from stored files (nginx-vod-module style), and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -173,6 +173,27 @@ $video->update(['thumbnails' => $result->toArray()]);
 - **Serving:** sheets come from the result's disk (`fromArray($data, $disk)` overrides it), as a redirect to a temporary URL on disks that provide them. Routes: `thumbnails.m3u8` and `thumbnails/{sheet}.{jpg|webp}`.
 - `ThumbnailsResult` records the grid (`columns`, `rows`) and the tile size (`width`, `height`); `toArray()`/`fromArray()` store it in a JSON column.
 
+### Chapters, scenes and markers
+
+@boostsnippet("Named time ranges in the manifest", "php")
+use Foxws\Media\Delivery\Marker;
+use Foxws\Media\FFMpeg\Scene;
+
+// in the job that stores the video: scene detection decodes the whole video
+$video->update(['scenes' => array_map(fn (Scene $scene) => $scene->toArray(), $media->scenes())]);
+
+// in the stream definition
+->stream()
+    ->withChapters()                                                   // chapters of the first opened file, class "chapter"
+    ->withScenes(array_map(Scene::fromArray(...), $video->scenes))     // class "scene"
+    ->withMarkers([new Marker(12.4, 20.6, 'Intro', class: 'intro')])   // leave out the end for a single moment
+@endboostsnippet
+
+- **HLS:** every video and audio media playlist gets `#EXT-X-PROGRAM-DATE-TIME:1970-01-01T00:00:00.000Z`, so a marker's `START-DATE` is the epoch plus its start in seconds, and one `#EXT-X-DATERANGE` per marker with `ID="{class}-{n}"`, `CLASS`, `DURATION` and the title as `X-TITLE`. Subtitle and image playlists get the same anchor. Without markers, no date tags are added.
+- **DASH:** one `<EventStream schemeIdUri="urn:foxws:media:marker" value="{class}" timescale="1000">` per class at the start of the Period, with `<Event id presentationTime duration>` in milliseconds and the title as its text.
+- **Players:** Shaka Player fires `timelineregionadded` for DASH events, and for HLS date ranges since 5.2 (older versions fire `metadata` with type `com.apple.quicktime.HLS`). Read `event.detail.schemeIdUri`/`value` (DASH) or the `CLASS` (HLS) to tell the kinds apart.
+- `markers()` returns them all, chapters included, sorted by start. `Marker` refuses a negative start, an end before its start and an empty class.
+
 ### Encrypting direct streams
 
 @boostsnippet("Per-request AES-128", "php")
@@ -200,6 +221,7 @@ use Foxws\Media\FFMpeg\Scene;
 $media = Media::fromDisk('s3')->open(['videos/a.mp4', 'videos/b.mp4']);
 
 $scenes = $media->scenes(threshold: 0.3);           // list<Scene> (start, end, score), cached per threshold
+// $scene->toArray() and Scene::fromArray() store scenes in a JSON column
 $clips = collect($scenes)
     ->sortByDesc('score')
     ->take(5)
