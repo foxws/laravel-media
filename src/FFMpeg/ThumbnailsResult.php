@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 namespace Foxws\Media\FFMpeg;
 
+use Foxws\Media\Casts\ThumbnailsResultCast;
 use Foxws\Media\Filesystem\Disk;
+use Illuminate\Contracts\Database\Eloquent\Castable;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Contracts\Support\Arrayable;
 
 /**
- * The sprite sheets and WebVTT file of a thumbnails export.
+ * The sprite sheets and WebVTT file of a thumbnails export. Cast a JSON column with
+ * `ThumbnailsResult::class` to keep it on a model.
  *
  * @implements Arrayable<string, mixed>
  */
-final readonly class ThumbnailsResult implements Arrayable
+final readonly class ThumbnailsResult implements Arrayable, Castable
 {
     /**
      * @param  list<string>  $sprites
@@ -53,6 +56,14 @@ final readonly class ThumbnailsResult implements Arrayable
             width: (int) ($result['width'] ?? 160),
             height: (int) ($result['height'] ?? 90),
         );
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $arguments
+     */
+    public static function castUsing(array $arguments): ThumbnailsResultCast
+    {
+        return new ThumbnailsResultCast;
     }
 
     /**
