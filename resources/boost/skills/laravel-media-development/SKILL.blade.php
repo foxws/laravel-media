@@ -168,17 +168,17 @@ use Foxws\Media\FFMpeg\ThumbnailsResult;
 
 // in the job that stores the video: sampling a whole video is too slow for a request
 $result = Media::fromDisk('videos')->open($path)->thumbnails()->every(5)->grid(10, 10)->toDisk('storyboards')->save("{$video->id}/storyboard");
-$video->update(['thumbnails' => $result->toArray()]);
+$video->update(['thumbnails' => $result]);   // with 'thumbnails' => ThumbnailsResult::class in the model's casts
 
 // in the stream definition
-->stream()->withThumbnails(ThumbnailsResult::fromArray($video->thumbnails))
+->stream()->withThumbnails($video->thumbnails)   // ThumbnailsResult or null
 @endboostsnippet
 
 - **HLS:** an `#EXT-X-IMAGE-STREAM-INF` image stream (sheet resolution, `CODECS="jpeg"` or `"webp"`) in both `cmaf.m3u8` and `hls.m3u8`, with an image playlist (`#EXT-X-IMAGES-ONLY`) that has an `#EXT-X-TILES` grid per sheet.
 - **DASH:** an `image` adaptation set with the DASH-IF `thumbnail_tile` property (e.g. `10x10`) and every sheet in a `SegmentList`, so sheet URLs can be signed.
 - **Players:** Shaka Player reads both through `getImageTracks()` and `getThumbnails($trackId, $time)`, so the player no longer needs `addThumbnailsTrack()` with the WebVTT file. The WebVTT file still works for players that only read that.
 - **Serving:** sheets come from the result's disk (`fromArray($data, $disk)` overrides it), as a redirect to a temporary URL on disks that provide them. Routes: `thumbnails.m3u8` and `thumbnails/{sheet}.{jpg|webp}`.
-- `ThumbnailsResult` records the grid (`columns`, `rows`) and the tile size (`width`, `height`); `toArray()`/`fromArray()` store it in a JSON column.
+- `ThumbnailsResult` records the grid (`columns`, `rows`) and the tile size (`width`, `height`). It's castable: `'thumbnails' => ThumbnailsResult::class` stores it in a JSON column and reads it back (null when empty), and accepts a stored array too. Without the cast, `toArray()`/`fromArray()` do the same by hand.
 
 ### Chapters, scenes and markers
 
