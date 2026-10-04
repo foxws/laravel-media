@@ -73,6 +73,8 @@ class DirectStream
 
     protected bool $chapters = false;
 
+    protected bool $trickPlay = false;
+
     /** @var list<string>|null */
     protected ?array $chapterClasses = ['chapter'];
 
@@ -363,6 +365,18 @@ class DirectStream
     }
 
     /**
+     * Offer an I-frame playlist per video variant in the CMAF master playlist, and a trick mode
+     * adaptation set in the DASH manifest, so players can show frames while fast-forwarding or
+     * scrubbing. Their segments hold only the keyframe each video segment starts with.
+     */
+    public function withTrickPlay(bool $trickPlay = true): static
+    {
+        $this->trickPlay = $trickPlay;
+
+        return $this;
+    }
+
+    /**
      * Offer named time ranges, like an intro or the credits, as #EXT-X-DATERANGE tags in the HLS media
      * playlists and as Events in the DASH manifest.
      *
@@ -597,6 +611,10 @@ class DirectStream
             $lines[] = $playlistUrl($audio, Track::Audio);
         }
 
+        foreach ($this->trickPlay ? $videos : [] as $variant) {
+            $lines[] = $this->iFrameStreamInf($variant, $playlistUrl($variant, Track::IFrames));
+        }
+
         return implode("\n", [...$lines, ...$images])."\n";
     }
 
@@ -642,7 +660,7 @@ class DirectStream
         ];
 
         if ($map !== null) {
-            $lines[] = '#EXT-X-INDEPENDENT-SEGMENTS';
+            $lines[] = $track === Track::IFrames ? '#EXT-X-I-FRAMES-ONLY' : '#EXT-X-INDEPENDENT-SEGMENTS';
 
             // Players read the key ID from the initialization segment and use the key as a ClearKey.
             if ($keyUrl !== null) {
@@ -703,6 +721,20 @@ class DirectStream
             $sets[] = implode("\n", ['    <AdaptationSet id="0" contentType="video" mimeType="video/mp4" startWithSAP="1">', ...$this->contentProtection(), ...$representations, '    </AdaptationSet>']);
         }
 
+        $trickSet = null;
+
+        if ($this->trickPlay && $videos !== []) {
+            $representations = array_map(fn (int $variant): string => $this->representation($variant, Track::IFrames, $initUrl, $segmentUrl), $videos);
+
+            $trickSet = implode("\n", [
+                '    <AdaptationSet id="{id}" contentType="video" mimeType="video/mp4" startWithSAP="1">',
+                '      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="0"/>',
+                ...$this->contentProtection(),
+                ...$representations,
+                '    </AdaptationSet>',
+            ]);
+        }
+
         if (($audio = $this->audioVariant()) !== null) {
             $this->ensureEncryptable($audio, Track::Audio);
 
@@ -731,6 +763,10 @@ class DirectStream
                 count($this->subtitles()) + 2,
                 $thumbnailUrl ?? throw new InvalidArgumentException('Streams with thumbnails need the URLs of their sprite sheets.'),
             );
+        }
+
+        if ($trickSet !== null) {
+            $sets[] = str_replace('{id}', (string) (count($this->subtitles()) + ($this->thumbnails !== null ? 3 : 2)), $trickSet);
         }
 
         return implode("\n", [
@@ -1096,8 +1132,9 @@ class DirectStream
                 '-copyts',
                 '-i', $media->inputPath(),
                 '-map', $track->map(),
+                ...($track === Track::IFrames ? ['-frames:v', '1'] : []),
                 '-c', 'copy',
-                ...($track === Track::Video && $this->opener->probe($media->path())->videoStream()?->codecName === 'hevc' ? ['-tag:v', 'hvc1'] : []),
+                ...($track->isVideo() && $this->opener->probe($media->path())->videoStream()?->codecName === 'hevc' ? ['-tag:v', 'hvc1'] : []),
                 '-output_ts_offset', (string) FragmentedMp4::TIMESTAMP_OFFSET,
                 '-avoid_negative_ts', 'disabled',
                 '-use_editlist', '0',
@@ -1387,7 +1424,7 @@ class DirectStream
 
         $streams = match ($track) {
             null => [$probe->videoStream(), $probe->audioStream()],
-            Track::Video => [$probe->videoStream()],
+            Track::Video, Track::IFrames => [$probe->videoStream()],
             Track::Audio => [$probe->audioStream()],
         };
 
@@ -1413,7 +1450,7 @@ class DirectStream
     {
         $probe = $this->probe($variant);
 
-        if (! ($track === Track::Video ? $probe->hasVideo() : $probe->hasAudio())) {
+        if (! ($track->isVideo() ? $probe->hasVideo() : $probe->hasAudio())) {
             throw SegmentNotFoundException::forTrack($variant, $track->value);
         }
     }
@@ -1436,7 +1473,7 @@ class DirectStream
     protected function ensureEncryptable(int $variant, Track $track): void
     {
         $probe = $this->probe($variant);
-        $codec = ($track === Track::Video ? $probe->videoStream() : $probe->audioStream())?->codecName;
+        $codec = ($track->isVideo() ? $probe->videoStream() : $probe->audioStream())?->codecName;
 
         if ($this->keys !== null && FragmentedMp4Codec::tryFrom((string) $codec)?->isEncryptable() === false) {
             throw InvalidMediaException::notEncryptable((string) $codec);
@@ -1475,19 +1512,25 @@ class DirectStream
     protected function representation(int $variant, Track $track, callable $initUrl, callable $segmentUrl): string
     {
         $probe = $this->probe($variant);
-        $stream = ($track === Track::Video ? $probe->videoStream() : $probe->audioStream()) ?? throw SegmentNotFoundException::forTrack($variant, $track->value);
-        $codecs = $track === Track::Video ? Codecs::video($stream) : Codecs::audio($stream);
+        $stream = ($track->isVideo() ? $probe->videoStream() : $probe->audioStream()) ?? throw SegmentNotFoundException::forTrack($variant, $track->value);
+        $codecs = $track->isVideo() ? Codecs::video($stream) : Codecs::audio($stream);
         $segments = $this->segments($variant);
         $offset = FragmentedMp4::TIMESTAMP_OFFSET * 1000;
 
         $attributes = array_filter([
             'id' => "{$track->value}-{$variant}",
             'codecs' => $codecs,
-            'bandwidth' => (string) ($track === Track::Audio ? ($stream->bitRate ?? 128000) : $this->bandwidth($this->opener->paths()[$variant])),
+            'bandwidth' => (string) match ($track) {
+                Track::Audio => $stream->bitRate ?? 128000,
+                Track::IFrames => $this->iFrameBandwidth($variant),
+                Track::Video => $this->bandwidth($this->opener->paths()[$variant]),
+            },
             'width' => $stream instanceof VideoStream && $stream->width !== null ? (string) $stream->width : null,
             'height' => $stream instanceof VideoStream && $stream->height !== null ? (string) $stream->height : null,
-            'frameRate' => $stream instanceof VideoStream && preg_match('#^[1-9]\d*(/[1-9]\d*)?$#', (string) $stream->get('avg_frame_rate')) === 1 ? (string) $stream->get('avg_frame_rate') : null,
+            'frameRate' => $track === Track::Video && $stream instanceof VideoStream && preg_match('#^[1-9]\d*(/[1-9]\d*)?$#', (string) $stream->get('avg_frame_rate')) === 1 ? (string) $stream->get('avg_frame_rate') : null,
             'audioSamplingRate' => $stream instanceof AudioStream && $stream->sampleRate !== null ? (string) $stream->sampleRate : null,
+            'maxPlayoutRate' => $track === Track::IFrames ? (string) $this->iFramePlayoutRate() : null,
+            'codingDependency' => $track === Track::IFrames ? 'false' : null,
         ]);
 
         $timeline = [];
@@ -1576,6 +1619,40 @@ class DirectStream
         ]);
 
         return '#EXT-X-STREAM-INF:'.implode(',', array_map(fn (string $key, string $value): string => "{$key}={$value}", array_keys($attributes), $attributes));
+    }
+
+    /**
+     * An #EXT-X-I-FRAME-STREAM-INF line for the I-frame playlist of a video variant.
+     */
+    protected function iFrameStreamInf(int $variant, string $url): string
+    {
+        $video = $this->probe($variant)->videoStream();
+
+        $attributes = array_filter([
+            'BANDWIDTH' => (string) $this->iFrameBandwidth($variant),
+            'RESOLUTION' => $video?->width !== null && $video->height !== null ? "{$video->width}x{$video->height}" : null,
+            'CODECS' => $video !== null ? '"'.Codecs::video($video).'"' : null,
+            'URI' => "\"{$url}\"",
+        ]);
+
+        return '#EXT-X-I-FRAME-STREAM-INF:'.implode(',', array_map(fn (string $key, string $value): string => "{$key}={$value}", array_keys($attributes), $attributes));
+    }
+
+    /**
+     * An estimate of the bandwidth of a variant's I-frames: a tenth of the variant's, as a keyframe
+     * per segment is far smaller than the segment but larger than its other frames.
+     */
+    protected function iFrameBandwidth(int $variant): int
+    {
+        return max(1, intdiv($this->bandwidth($this->opener->paths()[$variant]), 10));
+    }
+
+    /**
+     * The playback rate the I-frames are meant for: showing one per second, with one per segment.
+     */
+    protected function iFramePlayoutRate(): int
+    {
+        return max(1, (int) round($this->targetDuration()));
     }
 
     protected function isoDuration(float $seconds): string
