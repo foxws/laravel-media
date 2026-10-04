@@ -33,7 +33,7 @@ $probe->format()->bitRate;
 $probe->stream(2)?->get('tags.title');   // any raw ffprobe field via dot notation
 @endboostsnippet
 
-- `open()` accepts several paths. `probe($path)` probes one (the first by default), and `probeAll()` returns them keyed by path. Results are cached on the opener.
+- `open()` accepts several paths. `probe($path)` probes one (the first by default), and `probeAll()` returns them keyed by path. Results are cached on the opener; after `rememberProbes()` they're also kept in `media.delivery.cache_store` per file version, like keyframe indexes. `stream()` turns that on, so playlist and segment requests don't run ffprobe again.
 - On disks that provide temporary URLs (S3), ffprobe and ffmpeg read a short-lived signed URL instead of downloading the file. Set `media.remote_inputs.enabled` to false to download to the temporary root instead.
 
 ## Running ffmpeg
@@ -124,6 +124,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 @endboostsnippet
 
 - `masterPlaylist(fn (int $variant) => ...)` lists the variants with their bandwidth, resolution, frame rate and codecs.
+- **Probes:** each file is probed once per version, then read from `media.delivery.cache_store` for `media.delivery.index_lifetime` seconds, so playlist, init and segment requests skip ffprobe.
 - **Segments:** `ffmpeg -ss … -t … -copyts -c copy -f mpegts` copies each segment exactly, because segments start on keyframes. S3 sources are read through signed URLs with range requests, so only the needed bytes are fetched. Concurrent requests for the same segment package it once (`Cache::lock`).
 - **The segment cache:** `media.delivery.cache_disk` can be local storage, a mounted `/tmp` or RAM disk, or S3 (override per stream with `toCache()`). Segments are keyed by file version, so a changed file gets new segments. On disks with temporary URLs, `segmentResponse()` redirects to one valid for `media.delivery.url_lifetime` seconds; otherwise it returns the file with long cache headers.
 - **Errors:** out-of-range segments and variants throw `SegmentNotFoundException` (a 404). Files with codecs MPEG-TS can't carry (VP9, AV1, Opus, ...) throw `InvalidMediaException`.
