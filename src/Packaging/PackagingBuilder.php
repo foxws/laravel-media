@@ -227,8 +227,8 @@ class PackagingBuilder
     }
 
     /**
-     * Use a new key every given number of seconds. Shaka Packager derives later keys from the first
-     * one, and only the first key is returned, so test full playback before relying on it.
+     * Use a new key every given number of seconds, for drivers that support it (Shaka Packager derives
+     * later keys from the first one). Only the first key is returned, so test full playback first.
      */
     public function withKeyRotation(int $seconds): static
     {
@@ -267,7 +267,7 @@ class PackagingBuilder
     }
 
     /**
-     * Set several driver options at once, e.g. withOptions(ShakaOptions::make()->lowLatencyDashMode()).
+     * Set several driver options at once, e.g. withOptions(['low_latency_dash_mode' => true]), or a driver's own typed options.
      *
      * @param  array<string, string|int|float|bool|null>|Arrayable<string, string|int|float|bool|null>  $options
      */

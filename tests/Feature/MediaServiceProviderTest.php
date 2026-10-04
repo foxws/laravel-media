@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Foxws\Media\Executables\Executable;
+use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Process\Runner;
+use Foxws\Media\Tests\Fixtures\AddOnExecutable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
@@ -51,8 +53,9 @@ it('adds a media section to php artisan about', function () {
     config([
         'media.disk' => 'media',
         'media.timeout' => 600,
-        'media.executables.packager' => 'laravel-media-missing-packager',
+        'add-on.executables.encoder' => 'laravel-media-missing-encoder',
     ]);
+    app(Executables::class)->register(AddOnExecutable::Encoder);
 
     Artisan::call('about', ['--only' => 'media', '--json' => true]);
 
@@ -63,6 +66,6 @@ it('adds a media section to php artisan about', function () {
         'temporary_files' => config('media.temporary_files.root'),
         'timeout' => '600s',
         'ffmpeg' => $ffmpeg,
-        'packager' => 'not found',
+        'encoder' => 'not found',
     ]);
 });

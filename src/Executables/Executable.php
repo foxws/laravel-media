@@ -10,7 +10,6 @@ enum Executable: string implements Binary
 {
     case FFMpeg = 'ffmpeg';
     case FFProbe = 'ffprobe';
-    case Packager = 'packager';
 
     public function identifier(): string
     {
@@ -29,15 +28,11 @@ enum Executable: string implements Binary
         return match ($this) {
             self::FFMpeg => 'MEDIA_FFMPEG_PATH',
             self::FFProbe => 'MEDIA_FFPROBE_PATH',
-            self::Packager => 'MEDIA_PACKAGER_PATH',
         };
     }
 
     public function versionArguments(): array
     {
-        return match ($this) {
-            self::FFMpeg, self::FFProbe => ['-version'],
-            self::Packager => ['--version'],
-        };
+        return ['-version'];
     }
 }

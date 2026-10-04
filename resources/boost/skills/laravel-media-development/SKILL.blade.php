@@ -1,6 +1,6 @@
 ---
 name: laravel-media-development
-description: Probe, process and package audio and video with foxws/laravel-media (ffprobe, ffmpeg and Shaka Packager), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with AES encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with per-request AES-128 or ClearKey (CENC) encryption, subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
+description: Probe, process and package audio and video with foxws/laravel-media (ffprobe and ffmpeg), including typed stream and chapter info, upload validation, progress reporting and cancelling, export events, clips, frames, subtitle extraction, scene detection, clip reels and concatenation, several outputs in one run, seek-preview thumbnail sprites with WebVTT, filters (scale, crop, fade, loudnorm, watermark, HDR to SDR tone mapping), encoding presets with bitrate and two-pass control, audio-only output, packaging into HLS and DASH with ClearKey encryption, signed manifests through DynamicHLSPlaylist and DynamicDASHManifest, streaming HLS and DASH straight from stored files (nginx-vod-module style) with per-request AES-128 or ClearKey (CENC) encryption, subtitles, thumbnail tracks and chapter or scene markers, and exporting to local or S3 disks. Use when working with the Media facade, Foxws\Media classes, config/media.php, or replacing pbmedia/laravel-ffmpeg and php-ffmpeg.
 license: MIT
 metadata:
   author: foxws
@@ -11,7 +11,7 @@ metadata:
 
 # Media with laravel-media
 
-`foxws/laravel-media` runs ffprobe, ffmpeg and Shaka Packager on files from any Laravel disk, and add-on packages (laravel-shaka, laravel-streamer, laravel-ab-av1) build on it. It builds commands directly. There is no php-ffmpeg underneath, so new ffmpeg options never wait on a package release.
+`foxws/laravel-media` runs ffprobe and ffmpeg on files from any Laravel disk. It builds commands directly. There is no php-ffmpeg underneath, so new ffmpeg options never wait on a package release.
 
 ## Opening and probing
 
@@ -338,7 +338,7 @@ $request->validate([
 
 ## Packaging into HLS and DASH
 
-Packaging splits already-encoded files into streaming segments with HLS and DASH manifests. It doesn't transcode, so encode renditions first (for example with the ffmpeg builder), then package them. Shaka Packager (`packager`) is the default driver.
+Packaging splits already-encoded files into streaming segments with HLS and DASH manifests, written to a disk. It doesn't transcode, so encode renditions first (for example with the ffmpeg builder), then package them. The default `native` driver needs only ffmpeg: it uses the same keyframe-aligned segmenting, playlists and encryption as direct streams. Other drivers can be registered for features it doesn't have.
 
 @boostsnippet("Packaging renditions", "php")
 $result = Media::fromDisk('renditions')
@@ -351,53 +351,27 @@ $result = Media::fromDisk('renditions')
 $result->path();    // "videos/1/master.m3u8" (manifests come first in paths())
 @endboostsnippet
 
-- **Shortcuts:** `exportAsHLS()`, `exportAsDASH()` and `exportAsStreams()` probe every opened file, add its video and audio (named `{index}_video.mp4`/`{index}_audio.mp4`), and apply `forVod()` (VOD playlist, codec switching, approximate segment timeline).
-- **By hand:** `->package()->addVideoStream($path)`, `->addAudioStream($path, language: 'eng')`, `->addTextStream('captions/nld.vtt', 'nld.mp4', 'nld', ['dash_roles' => 'subtitle'])`. Text files can come from anywhere on the source disk. Package subtitles as `.mp4` for DASH, because a plain `.vtt` output gets no segment index and players drop it.
-- **Settings:**
-  - `withHlsPlaylist('master.m3u8', HlsPlaylistType::Vod)`, `withDashManifest('manifest.mpd')`
-  - `segmentDuration(6)`, `fragmentDuration(2)` (a fragment can't be longer than a segment)
-  - `defaultLanguage()`, `defaultTextLanguage()`, `allowCodecSwitching()`, `approximateSegmentTimeline()`
-  - `withOption('hls_base_url', 'https://cdn.test/')` passes any other Shaka option as is
+- **Shortcuts:** `exportAsHLS()`, `exportAsDASH()` and `exportAsStreams()` probe every opened file, add its video and audio (named `{index}_video.mp4`/`{index}_audio.mp4`), and apply `forVod()`.
+- **By hand:** `->package()->addVideoStream($path, 'video/main.mp4')`, `->addAudioStream($path, language: 'eng')`, `->addTextStream('captions/nld.vtt', 'nld.mp4', 'nld')`. Text files can come from anywhere on the source disk.
+- **Settings:** `withHlsPlaylist('master.m3u8')`, `withDashManifest('manifest.mpd')`, `segmentDuration(6)`. Driver-specific settings (`fragmentDuration()`, `defaultLanguage()`, `withOption()`/`withOptions()`, ...) are passed on in the `PackagingSpec` for drivers that use them.
 - **Shared with the ffmpeg builder:** `toDisk()`, `withVisibility()`, `timeout()`, `withContext()`, save callbacks, `ExportCompleted`/`ExportFailed` events, failure reasons, S3 uploads, rollback and `command()`.
-- **Inputs:** they're read from local copies, downloaded from remote disks when needed. Names with commas or special characters are linked under a plain name, because Shaka's stream descriptors use commas.
-- **Drivers:** `media.packager.default` (`MEDIA_PACKAGER`) picks the default. Register another with `app(PackagerManager::class)->extend('name', fn () => new MyPackager)`, implementing `Foxws\Media\Packaging\Packager`, and choose it per export with `->using('name')`.
-- **Under `Media::fake()`**, packaging writes placeholder segments and manifests.
+- **Drivers:** `media.packager.default` (`MEDIA_PACKAGER`, default `native`) picks the default; `->using('name')` picks one per export. Register another with `app(PackagerManager::class)->extend('name', fn () => new MyPackager)`, implementing `Foxws\Media\Packaging\Packager`.
 
-### The native packager (no Shaka Packager)
+### Output of the native driver
 
-`->using('native')` packages with ffmpeg and the same segmenting, playlists and encryption as direct streams, so only ffmpeg and ffprobe need to be installed:
-
-@boostsnippet("Native packaging", "php")
-Media::fromDisk('renditions')->open(['1080.mp4', '720.mp4'])
-    ->exportAsStreams()
-    ->using('native')
-    ->withEncryption()                       // cenc (ClearKey); HLS playlists point at the key file
-    ->toDisk('streams')
-    ->save("videos/{$video->id}");
-@endboostsnippet
-
-- **Output:**
-  - CMAF only: fragmented MP4 segments, which HLS and DASH share.
-  - Each stream's output name without its extension is its directory, e.g. `0_video.mp4` gives `0_video/init.mp4`, `0_video/{n}.m4s` and the `0_video.m3u8` media playlist.
-  - Playlists and the manifest link everything relatively, also across directories.
-- **Subtitles:**
-  - DASH gets `{name}.vtt`.
-  - HLS gets `{name}.m3u8` with `{name}-hls.vtt`, which is mapped onto the segment timestamps.
-- **Segments are cut on keyframes** with `ffmpeg -c copy`, one run per segment and track, and kept on `media.delivery.cache_disk`. A file that's already been played directly is packaged from the cache without running ffmpeg again. Run it in a queued job for long videos.
-- **Encryption:**
-  - `cenc` with one key, written to the key file.
-  - HLS playlists get `#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,KEYFORMAT="identity"`.
-  - The DASH manifest names the key ID with a ClearKey `ContentProtection` but has no license URL, so give players the key (Shaka Player's `drm.clearKeys`), or serve it through `Route::mediaStream()` instead.
-- **Not supported:** Shaka options (`withOption()`), live playlist types, cbcs, key rotation, a clear lead, and more than one audio stream. These throw `InvalidArgumentException`; use the Shaka driver for them.
+- **CMAF only:** fragmented MP4 segments, which HLS and DASH share.
+- **Layout:** each stream's output name without its extension is its directory, e.g. `0_video.mp4` gives `0_video/init.mp4`, `0_video/{n}.m4s` and the `0_video.m3u8` media playlist. Playlists and the manifest link everything relatively, also across directories.
+- **Subtitles:** DASH gets `{name}.vtt`; HLS gets `{name}.m3u8` with `{name}-hls.vtt`, mapped onto the segment timestamps.
+- **Speed:** segments are cut on keyframes with `ffmpeg -c copy`, one run per segment and track, and kept on `media.delivery.cache_disk`. A file that's already been played directly is packaged from the cache without running ffmpeg again. Package long videos in a queued job.
+- **Not supported:** driver options, live playlist types, cbcs, key rotation, a clear lead and more than one audio stream throw `InvalidArgumentException`.
+- **Under `Media::fake()`**, it writes real playlists and manifests around placeholder segments.
 
 ### Encryption
 
-@boostsnippet("AES encryption", "php")
-use Foxws\Media\Encryption\ProtectionScheme;
-
+@boostsnippet("ClearKey encryption", "php")
 $result = Media::fromDisk('renditions')->open($renditions)
     ->exportAsStreams()
-    ->withEncryption(scheme: ProtectionScheme::Cbcs)   // a new random key unless you pass one
+    ->withEncryption()                       // cenc with a new random key unless you pass one
     ->toDisk('streams')
     ->withVisibility('private')
     ->save("videos/{$video->id}");
@@ -408,40 +382,11 @@ $video->update([
 ]);
 @endboostsnippet
 
-- **The key file:** the raw 16-byte key is saved next to the segments as `key`, and HLS playlists reference it by that name. Keep the disk private and serve the key only through an authorized route or a short-lived signed URL. `$key->binary()` returns the bytes to respond with.
+- **The key file:** the raw 16-byte key is saved next to the segments as `key`. HLS playlists get `#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,KEYFORMAT="identity"` pointing at it, relative to each playlist. Keep the disk private and serve the key only through an authorized route or a short-lived signed URL. `$key->binary()` returns the bytes to respond with.
 - **Serving the key yourself:** pass `withEncryption(keyFile: null, keyUri: route('videos.key', $video))` to skip the key file and point playlists at your route.
-- **Schemes:** null uses Shaka's default, `cenc`. Use `cbcs` when one set of segments serves both HLS and DASH, including Safari. Avoid `cbc1` and `cens`, which few players support.
-- **DASH** has no key URI, so DASH players need the key themselves, for example Shaka Player's `drm.clearKeys` with the key ID and key.
-- `withClearLead($seconds)` leaves the start unencrypted, so playback can begin before the key is fetched.
-- `withKeyRotation($seconds)` uses a new key per period. Shaka derives the later keys from the first one, and only the first key is returned, so test full playback before relying on it.
+- **DASH** manifests name the key ID with a ClearKey `ContentProtection` but no license URL, so DASH players need the key themselves, e.g. Shaka Player's `drm.clearKeys`. For a license URL, stream with `Route::mediaStream()` instead.
+- **Schemes:** the native driver encrypts with `cenc`; other `ProtectionScheme`s, `withClearLead()` and `withKeyRotation()` need a driver that supports them.
 - Keys are redacted from commands, logs and events.
-
-### Shaka Packager options
-
-Options only Shaka Packager has (DRM key servers, live and low-latency DASH, base URLs, segment numbering) are typed and validated in `Foxws\Media\Packaging\Drivers\Shaka\ShakaOptions`, so the generic builder stays driver-neutral:
-
-@boostsnippet("Shaka options", "php")
-use Foxws\Media\Packaging\Drivers\Shaka\{ProtectionSystem, ShakaOptions};
-
-$media->package()->addStreamsFrom()->withDashManifest()
-    ->withOptions(ShakaOptions::make()
-        ->baseUrls('https://cdn.test/videos/1/')
-        ->lowLatencyDashMode()
-        ->timeShiftBufferDepth(60)
-        ->widevine('https://license.test/cenc/getcontentkey', contentId: 'abcd1234')
-        ->aesSigning('widevine_test', $signingKey, $signingIv)
-        ->protectionSystems(ProtectionSystem::Widevine, ProtectionSystem::PlayReady))
-    ->save('videos/1');
-@endboostsnippet
-
-- **HLS:** `hlsBaseUrl()`, `hlsMediaSequenceNumber()`, `hlsStartTimeOffset()`, `createSessionKeys()`.
-- **Live DASH:** `minBufferTime()`, `minimumUpdatePeriod()`, `suggestedPresentationDelay()`, `timeShiftBufferDepth()`, `preservedSegmentsOutsideLiveWindow()`, `utcTimings([...])`, `lowLatencyDashMode()`, `generateStaticLiveMpd()`.
-- **Segments:** `startSegmentNumber()`, `transportStreamTimestampOffset()`, `forceClIndex()`.
-- **Encryption:**
-  - `cryptByteBlock()`, `skipByteBlock()`, `vp9SubsampleEncryption()`, `protectionSystems(ProtectionSystem::...)`, `pssh()`, `iv()`, `playreadyExtraHeaderData()`
-  - `widevine()`, `playready()`, `maxPixels()`, `groupId()`, `enableEntitlementLicense()`
-  - `aesSigning()` or `rsaSigning()` (one at a time), `keyServerTls()`, `decrypt()`
-- Signing keys, IVs, PSSH and certificate passwords are redacted from commands and logs. `withOptions([...])` also takes a plain array, and `withOption()` takes a single raw option.
 
 ## Serving manifests with signed URLs
 
@@ -606,24 +551,24 @@ Each executable resolves lazily: an absolute path from config, or a command name
 Add-on packages bring their own executables by implementing `Foxws\Media\Executables\Binary`, usually on an enum:
 
 @boostsnippet("An add-on executable", "php")
-enum AbAv1Executable: string implements Binary
+enum EncoderExecutable: string implements Binary
 {
-    case AbAv1 = 'ab-av1';
+    case Encoder = 'encoder';
 
     public function identifier(): string { return $this->value; }
-    public function configuredPath(): string { return Config::string('ab-av1.executable', 'ab-av1'); }
-    public function environmentKey(): string { return 'AB_AV1_PATH'; }
+    public function configuredPath(): string { return Config::string('encoder.path', 'encoder'); }
+    public function environmentKey(): string { return 'ENCODER_PATH'; }
     public function versionArguments(): array { return ['--version']; }
 }
 
 // in the add-on's service provider
-$this->app->make(Executables::class)->register(AbAv1Executable::AbAv1);   // lists it in media:info and about
-Opener::macro('abAv1', fn () => new AbAv1Builder($this));                 // $opener->abAv1()
+$this->app->make(Executables::class)->register(EncoderExecutable::Encoder);   // lists it in media:info and about
+Opener::macro('encoder', fn () => new EncoderBuilder($this));             // $opener->encoder()
 @endboostsnippet
 
 - `Runner::run($binary, $arguments, environment: ['SVT_LOG' => '1'])` runs it with progress, cancelling, events, logging and redacted keys, like ffmpeg.
 - `Opener` and `MediaFactory` take macros, and the `Media` facade forwards `MediaFactory` macros.
-- In tests, `Media::fake()->respondUsing(AbAv1Executable::AbAv1, fn (array $arguments) => '...')` fakes its output, and the usual assertions accept any `Binary`.
+- In tests, `Media::fake()->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => '...')` fakes its output, and the usual assertions accept any `Binary`.
 
 ## Configuration
 
@@ -632,8 +577,8 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | Key | Purpose |
 | --- | --- |
 | `disk` | Default disk for `Media::open()` (`MEDIA_DISK`) |
-| `packager.default` | Packager driver (`MEDIA_PACKAGER`, `shaka`) |
-| `executables.ffmpeg`, `.ffprobe`, `.packager` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
+| `packager.default` | Packager driver (`MEDIA_PACKAGER`, `native`) |
+| `executables.ffmpeg`, `.ffprobe` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `delivery.segment_duration`, `.cache_store`, `.index_lifetime` | Segment length and keyframe index caching for streaming from stored files |
 | `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served (`media:prune` trims the cache) |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
@@ -713,7 +658,7 @@ CreateClip::run($video);   // the code under test
 Media::assertProbed('uploads/movie.mkv');
 Media::assertSaved('clips/1.mp4', 'clips');
 Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('libx264', $arguments, true));
-Media::assertNotRan(Executable::Packager);
+Media::assertNotRan(Executable::FFMpeg, fn (array $arguments) => in_array('-pass', $arguments, true));
 @endboostsnippet
 
 - Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `transfer: 'smpte2084'` (HDR) and `frameRate`.

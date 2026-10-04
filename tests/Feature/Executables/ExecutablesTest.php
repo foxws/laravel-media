@@ -8,10 +8,10 @@ use Foxws\Media\Executables\Executables;
 use Foxws\Media\Tests\Fixtures\AddOnExecutable;
 
 it('uses a configured absolute path to an executable file', function () {
-    $path = fakeExecutable(Executable::Packager);
+    $path = fakeExecutable(Executable::FFProbe);
 
-    expect(Executables::make()->path(Executable::Packager))->toBe($path)
-        ->and(Executables::make()->available(Executable::Packager))->toBeTrue();
+    expect(Executables::make()->path(Executable::FFProbe))->toBe($path)
+        ->and(Executables::make()->available(Executable::FFProbe))->toBeTrue();
 });
 
 it('finds a command name in the PATH', function () {

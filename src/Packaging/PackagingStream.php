@@ -13,7 +13,7 @@ final readonly class PackagingStream
 {
     /**
      * @param  string  $output  The output file, relative to the export directory.
-     * @param  array<string, string>  $options  Extra driver-specific stream fields, e.g. ['dash_roles' => 'subtitle'] for Shaka.
+     * @param  array<string, string>  $options  Extra driver-specific stream fields, e.g. ['dash_roles' => 'subtitle'].
      */
     public function __construct(
         public StreamType $type,

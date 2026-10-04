@@ -33,7 +33,6 @@ return [
     'executables' => [
         'ffmpeg' => env('MEDIA_FFMPEG_PATH', 'ffmpeg'),
         'ffprobe' => env('MEDIA_FFPROBE_PATH', 'ffprobe'),
-        'packager' => env('MEDIA_PACKAGER_PATH', 'packager'),
     ],
 
     /*
@@ -41,14 +40,13 @@ return [
     | Packager
     |--------------------------------------------------------------------------
     |
-    | The driver that packages encoded media into DASH and HLS: "shaka" (Shaka
-    | Packager) or "native" (ffmpeg only). Register others with
-    | PackagerManager::extend().
+    | The driver that packages encoded media into DASH and HLS. "native" needs
+    | only ffmpeg. Register others with PackagerManager::extend().
     |
     */
 
     'packager' => [
-        'default' => env('MEDIA_PACKAGER', 'shaka'),
+        'default' => env('MEDIA_PACKAGER', 'native'),
     ],
 
     /*

@@ -5,15 +5,13 @@ declare(strict_types=1);
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Filesystem\TemporaryDirectory;
 use Foxws\Media\Packaging\Drivers\Native\NativePackager;
-use Foxws\Media\Packaging\Drivers\Shaka\ShakaPackager;
 use Foxws\Media\Packaging\Packager;
 use Foxws\Media\Packaging\PackagerManager;
 use Foxws\Media\Packaging\PackagingSpec;
 use Illuminate\Support\Facades\Storage;
 
-it('uses shaka packager by default and offers the native packager', function () {
-    expect(app(PackagerManager::class)->driver())->toBeInstanceOf(ShakaPackager::class)
-        ->and(app(PackagerManager::class)->driver('native'))->toBeInstanceOf(NativePackager::class);
+it('uses the native packager by default', function () {
+    expect(app(PackagerManager::class)->driver())->toBeInstanceOf(NativePackager::class);
 });
 
 it('packages with a registered custom driver', function () {

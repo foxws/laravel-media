@@ -83,11 +83,11 @@ it('dispatches a failed event when the process fails', function () {
 });
 
 it('hides encryption keys in the command it reports', function () {
-    fakeExecutable(Executable::Packager);
+    config(['add-on.executables.encoder' => fakeExecutable(Executable::FFMpeg)]);
     Process::fake();
     Event::fake([ProcessStarted::class]);
 
-    Runner::make()->run(Executable::Packager, [
+    Runner::make()->run(AddOnExecutable::Encoder, [
         '--keys', 'label=:key_id=0123456789abcdef0123456789abcdef:key=fedcba9876543210fedcba9876543210',
         '--iv=00112233445566778899aabbccddeeff',
         '--enable_raw_key_encryption',

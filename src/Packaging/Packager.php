@@ -8,7 +8,7 @@ use Foxws\Media\Exceptions\ProcessFailedException;
 use Foxws\Media\Filesystem\TemporaryDirectory;
 
 /**
- * Packages already-encoded streams into DASH and HLS, e.g. with Shaka Packager.
+ * Packages already-encoded streams into DASH and HLS.
  */
 interface Packager
 {

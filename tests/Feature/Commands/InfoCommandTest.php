@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\Process;
 it('lists found and missing executables, including registered ones', function () {
     $ffmpeg = fakeExecutable(Executable::FFMpeg);
     $ffprobe = fakeExecutable(Executable::FFProbe);
-    $packager = fakeExecutable(Executable::Packager);
     config(['add-on.executables.encoder' => 'laravel-media-missing-encoder']);
     app(Executables::class)->register(AddOnExecutable::Encoder);
     Process::fake([
@@ -22,7 +21,6 @@ it('lists found and missing executables, including registered ones', function ()
         ->expectsTable(['Executable', 'Status', 'Path', 'Version'], [
             ['ffmpeg', '<fg=green>found</>', $ffmpeg, 'ffmpeg version 7.1.1'],
             ['ffprobe', '<fg=green>found</>', $ffprobe, 'version 3.4.2'],
-            ['packager', '<fg=green>found</>', $packager, 'version 3.4.2'],
             ['encoder', '<fg=red>missing</>', 'set ADD_ON_ENCODER_PATH', ''],
         ])
         ->assertSuccessful();
