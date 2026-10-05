@@ -42,6 +42,17 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | `delivery.look_ahead_connection` | `MEDIA_DELIVERY_LOOK_AHEAD_CONNECTION` | the default connection | Queue connection of the look-ahead job |
 | `delivery.look_ahead_queue` | `MEDIA_DELIVERY_LOOK_AHEAD_QUEUE` | the default queue | Queue of the look-ahead job |
 
+## Playback
+
+| Key | Variable | Default | Purpose |
+| --- | --- | --- | --- |
+| `playback.video_codecs` | `MEDIA_PLAYBACK_VIDEO_CODECS` | `h264,hevc,av1,vp9` | Video codecs browsers play, by ffprobe name |
+| `playback.audio_codecs` | `MEDIA_PLAYBACK_AUDIO_CODECS` | `aac,mp3,opus,flac` | Audio codecs browsers play |
+| `playback.video_codec` | `MEDIA_PLAYBACK_VIDEO_CODEC` | `libx264` | Encoder for video that doesn't play: `libx264`, `libx265` or `libsvtav1` |
+| `playback.crf` | `MEDIA_PLAYBACK_CRF` | the codec's (20, 24 or 30) | Quality of that encode |
+| `playback.preset` | `MEDIA_PLAYBACK_PRESET` | `medium`, or `8` for AV1 | Encoder preset |
+| `playback.audio_bitrate` | `MEDIA_PLAYBACK_AUDIO_BITRATE` | `192` | AAC bitrate in kbit/s for audio that doesn't play |
+
 ## Remote inputs
 
 | Key | Variable | Default | Purpose |

@@ -126,6 +126,23 @@ use Foxws\Media\Encryption\EncryptionKey;
 
 ClearKey hands the key to the browser. It protects segments in transit and at rest, but not from the viewer.
 
+## Playable files
+
+A direct stream copies streams as they are, so browsers have to decode the original codecs. MPEG-2, MPEG-4 Part 2 (DivX, XviD), VC-1 and 10-bit H.264 video, or DTS, TrueHD and PCM audio, don't play. Check a file with `playability()`, and re-encode only what doesn't play with `makePlayable()`, for example in the job that imports it:
+
+```php
+$media = Media::fromDisk('videos')->open('movie.mkv');
+
+if (! $media->playability()->isPlayable()) {
+    $media->makePlayable('movie-playable.mkv')->save();
+}
+```
+
+- **What plays:** the codecs in `media.playback.video_codecs` (`h264,hevc,av1,vp9`) and `media.playback.audio_codecs` (`aac,mp3,opus,flac`), by their ffprobe name. H.264 also has to be 8-bit 4:2:0, the others 4:2:0 at 8 or 10 bits. Firefox on Linux doesn't decode HEVC, so leave `hevc` out to play everywhere.
+- **What's re-encoded:** only the streams that don't play. When only the audio is the problem, the video is copied and the file is ready in seconds. Video is encoded with `media.playback.video_codec` (`libx264`, or `libx265` or `libsvtav1`), audio as AAC at `media.playback.audio_bitrate`.
+- **What's kept:** the first video stream (not cover art), every audio stream and, in containers other than MP4 and MOV, every subtitle stream. An MKV output keeps everything.
+- `playability()` also tells which streams need work: `needsVideoEncoding()` and `audioNeedingEncoding()`, with the positions of those audio streams. `makePlayable()` returns the ffmpeg builder, so `toDisk()`, `onProgress()` and `timeout()` work as usual.
+
 ## The segment cache
 
 - **Where:** segments are kept on `media.delivery.cache_disk` under `media.delivery.cache_path`. That can be local storage, a RAM disk or S3. On disks with temporary URLs, segment requests redirect to one. Keep the disk private when streams are encrypted.
