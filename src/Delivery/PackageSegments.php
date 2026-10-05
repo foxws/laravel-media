@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Delivery;
 
+use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
 use Foxws\Media\MediaFactory;
@@ -13,7 +14,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 
 /**
  * Packages segments of a direct stream ahead of their requests, so they're cached by the time
- * the player asks for them. Segments that got cached in the meantime are skipped.
+ * the player asks for them. Segments that got cached in the meantime are skipped. With a ladder,
+ * the variant is one of its renditions, encoded on request.
  */
 class PackageSegments implements ShouldBeUnique, ShouldQueue
 {
@@ -30,6 +32,8 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
         public readonly float $segmentDuration,
         public readonly string $cacheDisk,
         public readonly int $stream = 0,
+        public readonly ?Ladder $renditions = null,
+        public readonly int $variant = 0,
     ) {}
 
     /**
@@ -43,10 +47,11 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
             ->stream()
             ->segmentDuration($this->segmentDuration)
             ->toCache($this->cacheDisk)
+            ->withRenditions($this->renditions)
             ->lookAhead(0);
 
         foreach ($this->segments as $segment) {
-            $stream->segment(0, $segment, $this->track, $this->stream);
+            $stream->segment($this->variant, $segment, $this->track, $this->stream);
         }
     }
 
@@ -59,6 +64,7 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
             $this->track?->name($this->stream) ?? 'ts',
             $this->segmentDuration,
             $this->cacheDisk,
+            $this->variant,
         ]));
     }
 }
