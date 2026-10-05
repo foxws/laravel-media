@@ -471,6 +471,7 @@ $result->interval;  // seconds between thumbnails
 @endboostsnippet
 
 - It's one ffmpeg run with time-based sampling (`fps`), so it doesn't depend on the frame rate.
+- When every thumbnail fits on one sheet, the grid shrinks to the thumbnails it holds (2 thumbnails give a 2x1 sheet), so short videos don't get sheets that are mostly black. The result's `columns` and `rows` are the grid that was used.
 - `keyframesOnly()` adds `-skip_frame nokey` to the input, so only keyframes are decoded, often 10 to 50 times faster. Each thumbnail shows the last keyframe at or before its time, so with keyframes further apart than the interval, neighbouring thumbnails repeat. It suits seek previews, where speed matters more than the exact frame.
 - Without `withUrl()`, cues use the sheet's file name relative to the VTT file, so keep them together.
 - Media without a video stream or a known duration throws `InvalidMediaException`. `beforeSaving()`/`afterSaving()` are available, and `afterSaving` receives the `ThumbnailsResult`.

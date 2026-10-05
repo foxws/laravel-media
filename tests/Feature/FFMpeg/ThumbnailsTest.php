@@ -67,7 +67,7 @@ it('samples the video into sprite sheets with a webvtt file', function () {
         VTT);
 });
 
-it('runs ffmpeg once with time based sampling, letterboxed tiles and the sheet count', function () {
+it('runs ffmpeg once with time based sampling, letterboxed tiles, a grid fitted to the thumbnails and the sheet count', function () {
     fakeThumbnailProcesses(duration: 25);
     Storage::fake('videos');
 
@@ -76,10 +76,21 @@ it('runs ffmpeg once with time based sampling, letterboxed tiles and the sheet c
     Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
         && array_slice($process->command, 8, -1) === [
             '-map', '0:v:0',
-            '-vf', 'fps=1/10,scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tile=5x4',
+            '-vf', 'fps=1/10,scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tile=3x1',
             '-an', '-sn', '-q:v', '4', '-frames:v', '1', '-f', 'image2',
         ]
         && str_ends_with(end($process->command), '/storyboard_%03d.jpg'));
+});
+
+it('fits the grid of a single sheet to its thumbnails', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+
+    $result = Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(2)->grid(10, 10)->save('storyboard');
+
+    expect([$result->count, $result->columns, $result->rows])->toBe([13, 10, 2])
+        ->and(Storage::disk('videos')->get('storyboard.vtt'))->toContain("00:00:24.000 --> 00:00:25.000\nstoryboard_001.jpg#xywh=320,90,160,90");
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && str_contains(implode(' ', $process->command), ',tile=10x2 '));
 });
 
 it('decodes only keyframes when asked', function () {

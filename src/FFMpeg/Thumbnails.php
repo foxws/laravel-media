@@ -225,7 +225,8 @@ class Thumbnails
 
         $interval = $this->interval($duration);
         $count = (int) ceil($duration / $interval);
-        $sheets = (int) ceil($count / ($this->columns * $this->rows));
+        [$columns, $rows] = $this->fittedGrid($count);
+        $sheets = (int) ceil($count / ($columns * $rows));
 
         $exported = $this->opener->ffmpeg()
             ->when($this->keyframesOnly, fn (FFMpegBuilder $builder) => $builder->addInputArgs(['-skip_frame', 'nokey']))
@@ -234,7 +235,7 @@ class Thumbnails
                 Custom::video('fps=1/'.Number::format($interval)),
                 $probe->videoStream()?->isHdr() === true ? $this->toneMap : null,
                 Scale::fit($this->width, $this->height),
-                Custom::video("tile={$this->columns}x{$this->rows}"),
+                Custom::video("tile={$columns}x{$rows}"),
             ])))
             ->inFormat($this->sheetFormat($sheets))
             ->toDisk($this->disk())
@@ -251,7 +252,7 @@ class Thumbnails
 
         $this->disk()->put($vtt, $this->webVtt($name, $duration, $interval, $count), $this->visibility !== null ? ['visibility' => $this->visibility] : []);
 
-        $result = new ThumbnailsResult($this->disk(), $sprites, $vtt, $interval, $count, $this->columns, $this->rows, $this->width, $this->height);
+        $result = new ThumbnailsResult($this->disk(), $sprites, $vtt, $interval, $count, $columns, $rows, $this->width, $this->height);
 
         $this->runAfterSavingCallbacks($result);
 
@@ -263,7 +264,8 @@ class Thumbnails
      */
     public function webVtt(string $name, float $duration, float $interval, int $count): string
     {
-        $perSheet = $this->columns * $this->rows;
+        [$columns, $rows] = $this->fittedGrid($count);
+        $perSheet = $columns * $rows;
         $cues = ['WEBVTT'];
 
         for ($index = 0; $index < $count; $index++) {
@@ -275,14 +277,31 @@ class Thumbnails
                 $this->timestamp($index * $interval),
                 $this->timestamp(min(($index + 1) * $interval, $duration)),
                 $this->urlResolver !== null ? ($this->urlResolver)($sheet) : basename($sheet),
-                ($tile % $this->columns) * $this->width,
-                intdiv($tile, $this->columns) * $this->height,
+                ($tile % $columns) * $this->width,
+                intdiv($tile, $columns) * $this->height,
                 $this->width,
                 $this->height,
             );
         }
 
         return implode("\n\n", $cues)."\n";
+    }
+
+    /**
+     * The grid of the sheets: the configured one, or, when every thumbnail fits on one sheet, only
+     * as many columns and rows as they fill, so short videos don't get sheets that are mostly empty.
+     *
+     * @return array{int, int}
+     */
+    protected function fittedGrid(int $count): array
+    {
+        if ($count >= $this->columns * $this->rows) {
+            return [$this->columns, $this->rows];
+        }
+
+        $columns = max(1, min($this->columns, $count));
+
+        return [$columns, max(1, (int) ceil($count / $columns))];
     }
 
     protected function sheetFormat(int $sheets): Format
