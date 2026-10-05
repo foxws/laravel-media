@@ -169,6 +169,8 @@ $result->vtt;         // "1/storyboard.vtt"
 $result->toArray();   // store it, and give it to a stream with withThumbnails()
 ```
 
+When every thumbnail fits on one sheet, the grid shrinks to just the thumbnails it holds, so a short video gets a small sheet instead of a mostly empty one.
+
 ## Exporting
 
 - **S3 disks:** files upload concurrently, and large ones as multipart uploads that are aborted when they fail.
