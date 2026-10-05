@@ -559,10 +559,15 @@ Media::fromDisk('renditions')->open($result->paths())->stream();
 
 new Ladder([new Rendition(1440, 9000), new Rendition(720, 3000)], VideoCodec::Hevc, preset: 'slow', audioBitrate: 160);
 Ladder::standard()->codec(VideoCodec::Av1)->hardware(HardwareAcceleration::Vaapi)->keyframeInterval(4);
+
+// smaller sizes only, streamed under the untouched source as the top variant
+$media = Media::fromDisk('videos')->open('movie.mp4');
+$media->ladder(new Ladder([new Rendition(720, 2800), new Rendition(480, 1400)])->alignToSource(), 'renditions/{height}p.mp4')->save();
+Media::fromDisk('videos')->open(['movie.mp4', 'renditions/720p.mp4', 'renditions/480p.mp4'])->stream();
 @endboostsnippet
 
 - **Sizes:** a `Rendition` is the short side and the bitrates (`new Rendition(720, 2800)`; the peak defaults to 7% above, the buffer to twice the target). Portrait video is scaled on its width, so 720p means 720 pixels wide. Renditions larger than the source are skipped, and a source smaller than every rendition gets the smallest one at its own size.
-- **Switching:** keyframes are forced every `keyframeInterval` seconds (`media.delivery.segment_duration` by default) with scene-cut keyframes off, so every rendition has keyframes at the same times and direct streams cut the same segments from each.
+- **Switching:** keyframes are forced every `keyframeInterval` seconds (`media.delivery.segment_duration` by default) with scene-cut keyframes off, so every rendition has keyframes at the same times and direct streams cut the same segments from each. `->alignToSource()` instead forces keyframes where the source's direct stream segments start (from its keyframe index, each segment `keyframeInterval` or longer) and caps other keyframes with `-g 65535`, so the source can be streamed unchanged next to its renditions; stream them with the same segment duration. `->keyframesAt([...seconds])` sets the times by hand.
 - **Codecs:** H.264 (default, `medium`), HEVC (tagged `hvc1`) or AV1 (SVT-AV1, preset 8, without a peak bitrate), always with AAC audio in MP4 with `+faststart`.
 - **Hardware:** `media.ladder.hardware` (`MEDIA_LADDER_HARDWARE`: `none`, `vaapi`, `nvenc` or `qsv`), or `->hardware()` per ladder, decodes, scales (`scale_vaapi`, `scale_cuda`, `scale_qsv`) and encodes (`h264_vaapi`, `hevc_nvenc`, ...) on the GPU. VAAPI uses `media.ladder.vaapi_device` (`/dev/dri/renderD128`); the container needs access to it.
 - `ladder()` returns the ffmpeg builder, so `toDisk()`, `onProgress()`, `withContext()`, `timeout()` and save callbacks work as usual. The output pattern takes `{height}` and `{bitrate}`. HDR sources aren't tone mapped.

@@ -7,6 +7,7 @@ namespace Foxws\Media;
 use Foxws\Media\Delivery\DirectStream;
 use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Delivery\KeyframeIndexer;
+use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
@@ -172,13 +173,21 @@ class Opener
     /**
      * Encode the (first) opened file into every rendition of the ladder that fits its size, in one
      * ffmpeg run with an output per rendition, e.g. ladder(Ladder::standard())->toDisk('renditions')->save().
-     * The output paths replace {height} and {bitrate} in the pattern.
+     * The output paths replace {height} and {bitrate} in the pattern. A ladder aligned to the source
+     * gets keyframes where the source's segments start, from its keyframe index.
      *
      * @throws InvalidMediaException
      */
     public function ladder(Ladder $ladder, string $path = '{height}p.mp4'): FFMpegBuilder
     {
-        $source = $this->probe()->videoStream() ?? throw InvalidMediaException::noVideo($this->mediaFor()->path());
+        $probe = $this->probe();
+        $source = $probe->videoStream() ?? throw InvalidMediaException::noVideo($this->mediaFor()->path());
+
+        if ($ladder->alignToSource) {
+            $start = (float) $probe->format()->get('start_time', 0);
+            $ladder = $ladder->keyframesAt(array_map(fn (Segment $segment): float => $segment->start - $start, $this->keyframes()->segments($ladder->interval())));
+        }
+
         $builder = $this->ffmpeg()->addInputArgs($ladder->acceleration()->inputArguments());
 
         foreach ($ladder->for($source) as $rendition) {

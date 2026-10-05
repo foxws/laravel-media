@@ -45,6 +45,24 @@ it('encodes h264 at the rendition bitrates with keyframes at fixed times', funct
     ]);
 });
 
+it('places keyframes only at the given seconds, a millisecond early', function () {
+    $ladder = Ladder::standard()->keyframesAt([12.0, 0.0, 6.006, 12.0]);
+
+    expect($ladder->keyframes)->toBe([0.0, 6.006, 12.0])
+        ->and($ladder->format(new Rendition(720, 2800))->toArguments())
+        ->toContain('-force_key_frames', '0,6.005,11.999', '-g', '65535')
+        ->not->toContain('expr:gte(t,n_forced*6)');
+});
+
+it('aligns to the source with the keyframe interval as the shortest segment', function () {
+    config(['media.delivery.segment_duration' => 4.0]);
+
+    expect(Ladder::standard()->alignToSource)->toBeFalse()
+        ->and(Ladder::standard()->alignToSource()->alignToSource)->toBeTrue()
+        ->and(Ladder::standard()->interval())->toBe(4.0)
+        ->and(Ladder::standard()->keyframeInterval(10)->interval())->toBe(10.0);
+});
+
 it('turns scene-cut keyframes off for hevc and av1', function () {
     $hevc = Ladder::standard()->codec(VideoCodec::Hevc, 'slow')->keyframeInterval(4)->format(new Rendition(720, 2800))->toArguments();
     $av1 = Ladder::standard()->codec(VideoCodec::Av1)->audioBitrate(96)->format(new Rendition(720, 2800))->toArguments();

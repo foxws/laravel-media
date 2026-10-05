@@ -12,7 +12,9 @@ use InvalidArgumentException;
 
 /**
  * The renditions to encode a video into for adaptive streaming, each at its own size and bitrate,
- * with keyframes at the same times in every rendition so players can switch between them.
+ * with keyframes at the same times in every rendition so players can switch between them. Aligned
+ * to the source, the renditions get keyframes where the source's direct stream segments start, so
+ * the untouched source can be streamed as the top variant.
  */
 final readonly class Ladder
 {
@@ -21,6 +23,8 @@ final readonly class Ladder
      * @param  string|int|null  $preset  The encoder preset; the codec's default when null.
      * @param  float|null  $keyframeInterval  Seconds between keyframes; media.delivery.segment_duration when null.
      * @param  HardwareAcceleration|null  $hardware  media.ladder.hardware when null.
+     * @param  bool  $alignToSource  Whether ladder() places the keyframes where the source's segments start.
+     * @param  list<float>  $keyframes  Seconds to place the keyframes at, instead of every keyframe interval.
      */
     public function __construct(
         public array $renditions,
@@ -29,6 +33,8 @@ final readonly class Ladder
         public int $audioBitrate = 128,
         public ?float $keyframeInterval = null,
         public ?HardwareAcceleration $hardware = null,
+        public bool $alignToSource = false,
+        public array $keyframes = [],
     ) {
         if ($renditions === []) {
             throw new InvalidArgumentException('A ladder needs at least one rendition.');
@@ -74,6 +80,37 @@ final readonly class Ladder
     public function hardware(HardwareAcceleration $hardware): self
     {
         return $this->with(['hardware' => $hardware]);
+    }
+
+    /**
+     * Place the keyframes where the source's direct stream segments start, each the keyframe
+     * interval or longer, so the source and its renditions are split into the same segments and
+     * players can switch between them. Streams of the source should use the same segment duration.
+     */
+    public function alignToSource(bool $align = true): self
+    {
+        return $this->with(['alignToSource' => $align]);
+    }
+
+    /**
+     * Place the keyframes at the given seconds, and nowhere else.
+     *
+     * @param  list<float>  $seconds
+     */
+    public function keyframesAt(array $seconds): self
+    {
+        $seconds = array_values(array_unique(array_map(fn (float $second): float => max(0.0, $second), $seconds), SORT_REGULAR));
+        sort($seconds);
+
+        return $this->with(['keyframes' => $seconds]);
+    }
+
+    /**
+     * The seconds between keyframes, which is also the shortest segment when aligned to the source.
+     */
+    public function interval(): float
+    {
+        return $this->keyframeInterval ?? Config::float('media.delivery.segment_duration', 6.0);
     }
 
     /**
@@ -130,7 +167,7 @@ final readonly class Ladder
             arguments: [
                 ...($software ? [] : ['-c:v', $hardware->encoder($this->codec)]),
                 ...$this->codecArguments($software),
-                '-force_key_frames', 'expr:gte(t,n_forced*'.Number::format($this->keyframeInterval ?? Config::float('media.delivery.segment_duration', 6.0)).')',
+                ...$this->keyframeArguments(),
                 '-movflags', '+faststart',
             ],
         );
@@ -139,6 +176,25 @@ final readonly class Ladder
     public function acceleration(): HardwareAcceleration
     {
         return $this->hardware ?? HardwareAcceleration::configured();
+    }
+
+    /**
+     * Keyframes every interval, or at the given seconds only. Those are forced a millisecond early,
+     * so they land on the frame at that time, and other keyframes are capped at the longest GOP
+     * every encoder accepts, so they can't start segments of their own.
+     *
+     * @return list<string>
+     */
+    protected function keyframeArguments(): array
+    {
+        if ($this->keyframes === []) {
+            return ['-force_key_frames', 'expr:gte(t,n_forced*'.Number::format($this->interval()).')'];
+        }
+
+        return [
+            '-force_key_frames', implode(',', array_map(fn (float $second): string => Number::format(max(0.0, $second - 0.001)), $this->keyframes)),
+            '-g', '65535',
+        ];
     }
 
     /**
