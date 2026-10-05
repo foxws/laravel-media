@@ -29,6 +29,7 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
         public readonly ?Track $track,
         public readonly float $segmentDuration,
         public readonly string $cacheDisk,
+        public readonly int $stream = 0,
     ) {}
 
     /**
@@ -45,7 +46,7 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
             ->lookAhead(0);
 
         foreach ($this->segments as $segment) {
-            $stream->segment(0, $segment, $this->track);
+            $stream->segment(0, $segment, $this->track, $this->stream);
         }
     }
 
@@ -55,7 +56,7 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
             $this->disk,
             $this->path,
             implode(',', $this->segments),
-            $this->track->value ?? 'ts',
+            $this->track?->name($this->stream) ?? 'ts',
             $this->segmentDuration,
             $this->cacheDisk,
         ]));

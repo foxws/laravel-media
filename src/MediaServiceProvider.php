@@ -150,7 +150,8 @@ class MediaServiceProvider extends ServiceProvider
      * subtitles/{subtitle}/{format}.m3u8 and subtitles/{subtitle}/{format}.vtt for HLS, and
      * subtitles/{subtitle}.vtt for DASH. Thumbnails are served as thumbnails.m3u8 and
      * thumbnails/{sheet}.{jpg|webp}, and chapters as chapters.vtt. I-frames for trick play are a
-     * track of their own: {variant}/iframes/index.m3u8, init.mp4 and {segment}.m4s.
+     * track of their own: {variant}/iframes/index.m3u8, init.mp4 and {segment}.m4s. Audio streams after
+     * the first are the tracks audio-1, audio-2 and so on.
      */
     protected function registerRouteMacro(): void
     {
@@ -179,13 +180,13 @@ class MediaServiceProvider extends ServiceProvider
                     ->name('dash')->defaults('mediaStream', $stream);
 
                 $router->get('{variant}/{track}/index.m3u8', [MediaStreamController::class, 'trackPlaylist'])
-                    ->name('track-playlist')->defaults('mediaStream', $stream)->whereNumber('variant')->whereIn('track', ['video', 'audio', 'iframes']);
+                    ->name('track-playlist')->defaults('mediaStream', $stream)->whereNumber('variant')->where('track', 'video|iframes|audio(-[1-9][0-9]*)?');
 
                 $router->get('{variant}/{track}/init.mp4', [MediaStreamController::class, 'init'])
-                    ->name('init')->defaults('mediaStream', $stream)->whereNumber('variant')->whereIn('track', ['video', 'audio', 'iframes']);
+                    ->name('init')->defaults('mediaStream', $stream)->whereNumber('variant')->where('track', 'video|iframes|audio(-[1-9][0-9]*)?');
 
                 $router->get('{variant}/{track}/{segment}.m4s', [MediaStreamController::class, 'fragment'])
-                    ->name('fragment')->defaults('mediaStream', $stream)->whereNumber(['variant', 'segment'])->whereIn('track', ['video', 'audio', 'iframes']);
+                    ->name('fragment')->defaults('mediaStream', $stream)->whereNumber(['variant', 'segment'])->where('track', 'video|iframes|audio(-[1-9][0-9]*)?');
 
                 $router->get('subtitles/{subtitle}/{format}.m3u8', [MediaStreamController::class, 'subtitlePlaylist'])
                     ->name('subtitle-playlist')->defaults('mediaStream', $stream)->whereNumber('subtitle')->whereIn('format', ['cmaf', 'hls']);

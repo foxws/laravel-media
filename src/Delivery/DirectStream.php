@@ -75,6 +75,9 @@ class DirectStream
 
     protected bool $trickPlay = false;
 
+    /** @var list<int|string>|null */
+    protected ?array $audioSelection = null;
+
     /** @var list<string>|null */
     protected ?array $chapterClasses = ['chapter'];
 
@@ -365,6 +368,21 @@ class DirectStream
     }
 
     /**
+     * Which audio streams of the audio variant CMAF and DASH offer, each as an audio track players
+     * can pick by language: their positions among the file's audio streams (0 for the first) or
+     * their languages, e.g. [0] or ['eng', 'jpn']. Null offers every stream fragmented MP4 can carry.
+     * MPEG-TS segments always carry the first.
+     *
+     * @param  list<int|string>|null  $streams
+     */
+    public function withAudioStreams(?array $streams): static
+    {
+        $this->audioSelection = $streams;
+
+        return $this;
+    }
+
+    /**
      * Offer an I-frame playlist per video variant in the CMAF master playlist, and a trick mode
      * adaptation set in the DASH manifest, so players can show frames while fast-forwarding or
      * scrubbing. Their segments hold only the keyframe each video segment starts with.
@@ -564,7 +582,7 @@ class DirectStream
      * The master playlist, listing every opened file as a variant. Fragmented streams list the video
      * track of every file with video, and the audio track of the first file with audio as the audio rendition.
      *
-     * @param  callable(int, Track|null): string  $playlistUrl  Receives the variant's index and its track (null for MPEG-TS) and returns its media playlist URL.
+     * @param  callable(int, Track|null, int): string  $playlistUrl  Receives the variant's index, its track (null for MPEG-TS) and the track's stream, and returns its media playlist URL.
      * @param  (callable(int): string)|null  $subtitleUrl  Receives a subtitle track's index and returns its media playlist URL. Required with subtitles.
      * @param  (callable(): string)|null  $thumbnailUrl  Returns the URL of the thumbnails' image playlist. Required with thumbnails.
      *
@@ -581,7 +599,7 @@ class DirectStream
 
             foreach ($this->opener->paths() as $variant => $path) {
                 $lines[] = $this->streamInf($path, Codecs::for($this->opener->probe($path)), subtitleGroup: $group);
-                $lines[] = $playlistUrl($variant, null);
+                $lines[] = $playlistUrl($variant, null, 0);
             }
 
             return implode("\n", [...$lines, ...$images])."\n";
@@ -595,7 +613,17 @@ class DirectStream
         $videos = $this->videoVariants();
 
         if ($audio !== null && $videos !== []) {
-            $lines[] = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Audio",DEFAULT=YES,AUTOSELECT=YES,URI="'.$playlistUrl($audio, Track::Audio).'"';
+            $streams = $this->audioStreams($audio);
+            $default = $this->defaultAudioStream($audio);
+            $audioCodec = Codecs::join(array_values(array_unique(array_map(fn (AudioStream $stream): ?string => Codecs::audio($stream), $streams))));
+
+            foreach ($this->audioLabels($streams) as $position => $label) {
+                $language = $streams[$position]->language;
+
+                $lines[] = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="'.str_replace('"', "'", $label).'"'
+                    .($language !== null && $language !== 'und' ? ',LANGUAGE="'.str_replace('"', '', $language).'"' : '')
+                    .',DEFAULT='.($position === $default ? 'YES' : 'NO').',AUTOSELECT=YES,URI="'.$playlistUrl($audio, Track::Audio, $position).'"';
+            }
         }
 
         foreach ($videos as $variant) {
@@ -603,16 +631,16 @@ class DirectStream
             $codecs = Codecs::join([$video !== null ? Codecs::video($video) : null, ...($audio !== null ? [$audioCodec] : [])]);
 
             $lines[] = $this->streamInf($this->opener->paths()[$variant], $codecs, $audio !== null ? 'audio' : null, $group);
-            $lines[] = $playlistUrl($variant, Track::Video);
+            $lines[] = $playlistUrl($variant, Track::Video, 0);
         }
 
         if ($videos === [] && $audio !== null) {
             $lines[] = $this->streamInf($this->opener->paths()[$audio], $audioCodec, subtitleGroup: $group);
-            $lines[] = $playlistUrl($audio, Track::Audio);
+            $lines[] = $playlistUrl($audio, Track::Audio, $this->defaultAudioStream($audio));
         }
 
         foreach ($this->trickPlay ? $videos : [] as $variant) {
-            $lines[] = $this->iFrameStreamInf($variant, $playlistUrl($variant, Track::IFrames));
+            $lines[] = $this->iFrameStreamInf($variant, $playlistUrl($variant, Track::IFrames, 0));
         }
 
         return implode("\n", [...$lines, ...$images])."\n";
@@ -621,14 +649,15 @@ class DirectStream
     /**
      * The media playlist of a variant, or of one of its tracks when the stream is fragmented or a track is given, with one entry per segment.
      *
-     * @param  callable(Segment, int, Track|null): string  $segmentUrl  Receives the segment, the variant's index and the track (null for MPEG-TS) and returns its URL.
+     * @param  callable(Segment, int, Track|null, int): string  $segmentUrl  Receives the segment, the variant's index, the track (null for MPEG-TS) and its stream, and returns its URL.
      * @param  Track|null  $track  The track of a fragmented stream; defaults to the variant's video, or its audio.
-     * @param  (callable(int, Track): string)|null  $initUrl  Receives the variant's index and the track, and returns the URL of the initialization segment. Required for fragmented streams.
+     * @param  (callable(int, Track, int): string)|null  $initUrl  Receives the variant's index, the track and its stream, and returns the URL of the initialization segment. Required for fragmented streams.
+     * @param  int  $stream  The position of the track's stream among the file's streams of its type, e.g. 1 for the second audio stream.
      *
      * @throws SegmentNotFoundException
      * @throws InvalidArgumentException
      */
-    public function mediaPlaylist(int $variant, callable $segmentUrl, ?Track $track = null, ?callable $initUrl = null): string
+    public function mediaPlaylist(int $variant, callable $segmentUrl, ?Track $track = null, ?callable $initUrl = null, int $stream = 0): string
     {
         $map = null;
 
@@ -636,11 +665,11 @@ class DirectStream
             $this->ensureOneKey();
 
             $track ??= $this->probe($variant)->hasVideo() ? Track::Video : Track::Audio;
-            $this->ensureTrack($variant, $track);
-            $this->ensureEncryptable($variant, $track);
+            $this->ensureTrack($variant, $track, $stream);
+            $this->ensureEncryptable($variant, $track, $stream);
 
             $map = $initUrl !== null
-                ? $initUrl($variant, $track)
+                ? $initUrl($variant, $track, $stream)
                 : throw new InvalidArgumentException('Fragmented streams need the URL of the initialization segment.');
         }
 
@@ -681,7 +710,7 @@ class DirectStream
             }
 
             $lines[] = '#EXTINF:'.number_format($segment->duration, 6, '.', '').',';
-            $lines[] = $segmentUrl($segment, $variant, $map !== null ? $track : null);
+            $lines[] = $segmentUrl($segment, $variant, $map !== null ? $track : null, $stream);
         }
 
         $lines[] = '#EXT-X-ENDLIST';
@@ -693,8 +722,8 @@ class DirectStream
      * A static DASH manifest with fragmented MP4 segments: one video representation per file with video,
      * and the audio of the first file with audio. Every segment is listed, so each URL can be signed.
      *
-     * @param  callable(int, Track): string  $initUrl  Receives the variant's index and the track, and returns the URL of the initialization segment.
-     * @param  callable(Segment, int, Track): string  $segmentUrl  Receives the segment, the variant's index and the track, and returns its URL.
+     * @param  callable(int, Track, int): string  $initUrl  Receives the variant's index, the track and its stream, and returns the URL of the initialization segment.
+     * @param  callable(Segment, int, Track, int): string  $segmentUrl  Receives the segment, the variant's index, the track and its stream, and returns its URL.
      * @param  (callable(int): string)|null  $subtitleUrl  Receives a subtitle track's index and returns the URL of its WebVTT file. Required with subtitles.
      * @param  (callable(int): string)|null  $thumbnailUrl  Receives a sprite sheet's index and returns its URL. Required with thumbnails.
      *
@@ -736,18 +765,32 @@ class DirectStream
         }
 
         if (($audio = $this->audioVariant()) !== null) {
-            $this->ensureEncryptable($audio, Track::Audio);
+            $streams = $this->audioStreams($audio);
+            $labels = count($streams) > 1 ? $this->audioLabels($streams) : [];
+            $default = $this->defaultAudioStream($audio);
 
-            $language = $this->probe($audio)->audioStream()?->language;
-            $lang = $language !== null && $language !== 'und' ? ' lang="'.$this->xml($language).'"' : '';
+            foreach ($streams as $position => $stream) {
+                $this->ensureEncryptable($audio, Track::Audio, $position);
 
-            $sets[] = implode("\n", ['    <AdaptationSet id="1" contentType="audio" mimeType="audio/mp4"'.$lang.' startWithSAP="1">', ...$this->contentProtection(), $this->representation($audio, Track::Audio, $initUrl, $segmentUrl), '    </AdaptationSet>']);
+                $lang = $stream->language !== null && $stream->language !== 'und' ? ' lang="'.$this->xml($stream->language).'"' : '';
+
+                $sets[] = implode("\n", [
+                    '    <AdaptationSet id="'.($position + 1).'" contentType="audio" mimeType="audio/mp4"'.$lang.' startWithSAP="1">',
+                    ...(isset($labels[$position]) ? ['      <Label>'.$this->xml($labels[$position]).'</Label>', '      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="'.($position === $default ? 'main' : 'alternate').'"/>'] : []),
+                    ...$this->contentProtection(),
+                    $this->representation($audio, Track::Audio, $initUrl, $segmentUrl, $position),
+                    '    </AdaptationSet>',
+                ]);
+            }
         }
+
+        // Video is set 0 and audio starts at 1, so the ids of the other sets follow the audio sets.
+        $offset = 1 + max(1, $audio !== null ? count($this->audioStreams($audio)) : 0);
 
         // Text sets point straight at the WebVTT file, without SegmentBase, which players load as one segment.
         foreach ($this->subtitles() as $index => $subtitle) {
             $sets[] = implode("\n", [
-                '    <AdaptationSet id="'.($index + 2).'" contentType="text" mimeType="text/vtt"'.($subtitle->language !== null && $subtitle->language !== 'und' ? ' lang="'.$this->xml($subtitle->language).'"' : '').'>',
+                '    <AdaptationSet id="'.($offset + $index).'" contentType="text" mimeType="text/vtt"'.($subtitle->language !== null && $subtitle->language !== 'und' ? ' lang="'.$this->xml($subtitle->language).'"' : '').'>',
                 '      <Label>'.$this->xml($subtitle->label).'</Label>',
                 '      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="subtitle"/>',
                 '      <Representation id="text-'.$index.'" bandwidth="256">',
@@ -760,13 +803,13 @@ class DirectStream
         if ($this->thumbnails !== null) {
             $sets[] = $this->thumbnailAdaptationSet(
                 $this->thumbnails,
-                count($this->subtitles()) + 2,
+                $offset + count($this->subtitles()),
                 $thumbnailUrl ?? throw new InvalidArgumentException('Streams with thumbnails need the URLs of their sprite sheets.'),
             );
         }
 
         if ($trickSet !== null) {
-            $sets[] = str_replace('{id}', (string) (count($this->subtitles()) + ($this->thumbnails !== null ? 3 : 2)), $trickSet);
+            $sets[] = str_replace('{id}', (string) ($offset + count($this->subtitles()) + ($this->thumbnails !== null ? 1 : 0)), $trickSet);
         }
 
         return implode("\n", [
@@ -800,11 +843,11 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    public function segment(int $variant, int $index, ?Track $track = null): string
+    public function segment(int $variant, int $index, ?Track $track = null, int $stream = 0): string
     {
         $media = $this->media($variant);
         $segment = $this->segments($variant)[$index] ?? throw SegmentNotFoundException::for($variant, $index);
-        $path = $this->segmentPath($media, $segment, $track);
+        $path = $this->segmentPath($media, $segment, $track, $stream);
         $disk = $this->cacheDisk();
 
         if ($disk->exists($path)) {
@@ -812,16 +855,16 @@ class DirectStream
         }
 
         if ($track !== null) {
-            $this->ensureTrack($variant, $track);
+            $this->ensureTrack($variant, $track, $stream);
         }
 
-        $this->ensureStreamable($media, $track);
+        $this->ensureStreamable($media, $track, $stream);
 
         return Cache::lock("media:segment:{$path}", Config::integer('media.delivery.lock_timeout', 120))
-            ->block(Config::integer('media.delivery.lock_timeout', 120), function () use ($media, $segment, $path, $track): string {
+            ->block(Config::integer('media.delivery.lock_timeout', 120), function () use ($media, $segment, $path, $track, $stream): string {
                 // Another request may have packaged it while this one waited for the lock.
                 if (! $this->cacheDisk()->exists($path)) {
-                    $track !== null ? $this->packageFragment($media, $segment, $track, $path) : $this->package($media, $segment, $path);
+                    $track !== null ? $this->packageFragment($media, $segment, $track, $stream, $path) : $this->package($media, $segment, $path);
                 }
 
                 return $path;
@@ -835,13 +878,13 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    public function initSegment(int $variant, Track $track): string
+    public function initSegment(int $variant, Track $track, int $stream = 0): string
     {
         $media = $this->media($variant);
-        $path = $this->initPath($media, $track);
+        $path = $this->initPath($media, $track, $stream);
 
         if (! $this->cacheDisk()->exists($path)) {
-            $this->segment($variant, 0, $track);
+            $this->segment($variant, 0, $track, $stream);
         }
 
         return $path;
@@ -853,19 +896,19 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    public function initSegmentResponse(int $variant, Track $track): Response
+    public function initSegmentResponse(int $variant, Track $track, int $stream = 0): Response
     {
         if ($this->keys !== null) {
-            $content = $this->initSegmentContents($variant, $track);
+            $content = $this->initSegmentContents($variant, $track, $stream);
 
-            $this->packageAhead($variant, 1, $track);
+            $this->packageAhead($variant, 1, $track, $stream);
 
             return $this->encryptedResponse($content, $track->contentType());
         }
 
-        $path = $this->initSegment($variant, $track);
+        $path = $this->initSegment($variant, $track, $stream);
 
-        $this->packageAhead($variant, 1, $track);
+        $this->packageAhead($variant, 1, $track, $stream);
 
         return $this->fileResponse($path, $track->contentType());
     }
@@ -876,14 +919,14 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    public function initSegmentContents(int $variant, Track $track): string
+    public function initSegmentContents(int $variant, Track $track, int $stream = 0): string
     {
         if ($this->keys !== null) {
             $this->ensureOneKey();
-            $this->ensureEncryptable($variant, $track);
+            $this->ensureEncryptable($variant, $track, $stream);
         }
 
-        $content = $this->cachedInitSegment($variant, $track);
+        $content = $this->cachedInitSegment($variant, $track, $stream);
 
         return $this->keys !== null ? CommonEncryption::init($content, $this->key()) : $content;
     }
@@ -896,21 +939,21 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    public function segmentResponse(int $variant, int $index, ?Track $track = null): Response
+    public function segmentResponse(int $variant, int $index, ?Track $track = null, int $stream = 0): Response
     {
         $contentType = $track?->contentType() ?? 'video/mp2t';
 
         if ($this->keys !== null) {
-            $content = $this->segmentContents($variant, $index, $track);
+            $content = $this->segmentContents($variant, $index, $track, $stream);
 
-            $this->packageAhead($variant, $index + 1, $track);
+            $this->packageAhead($variant, $index + 1, $track, $stream);
 
             return $this->encryptedResponse($content, $contentType);
         }
 
-        $path = $this->segment($variant, $index, $track);
+        $path = $this->segment($variant, $index, $track, $stream);
 
-        $this->packageAhead($variant, $index + 1, $track);
+        $this->packageAhead($variant, $index + 1, $track, $stream);
 
         return $this->fileResponse($path, $contentType);
     }
@@ -922,21 +965,21 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    public function segmentContents(int $variant, int $index, ?Track $track = null): string
+    public function segmentContents(int $variant, int $index, ?Track $track = null, int $stream = 0): string
     {
         if ($this->keys !== null && $track !== null) {
             $this->ensureOneKey();
-            $this->ensureEncryptable($variant, $track);
+            $this->ensureEncryptable($variant, $track, $stream);
         }
 
-        $content = (string) $this->cacheDisk()->get($this->segment($variant, $index, $track));
+        $content = (string) $this->cacheDisk()->get($this->segment($variant, $index, $track, $stream));
 
         if ($this->keys === null) {
             return $content;
         }
 
         return $track !== null
-            ? CommonEncryption::segment($this->cachedInitSegment($variant, $track), $content, $this->key(), "{$variant}|{$track->value}|{$index}")
+            ? CommonEncryption::segment($this->cachedInitSegment($variant, $track, $stream), $content, $this->key(), "{$variant}|{$track->name($stream)}|{$index}")
             : $this->encrypt($content, $index);
     }
 
@@ -944,9 +987,9 @@ class DirectStream
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    protected function cachedInitSegment(int $variant, Track $track): string
+    protected function cachedInitSegment(int $variant, Track $track, int $stream = 0): string
     {
-        return (string) $this->cacheDisk()->get($this->initSegment($variant, $track));
+        return (string) $this->cacheDisk()->get($this->initSegment($variant, $track, $stream));
     }
 
     protected function encryptedResponse(string $content, string $contentType): Response
@@ -964,7 +1007,7 @@ class DirectStream
      *
      * @throws SegmentNotFoundException
      */
-    public function packageAhead(int $variant, int $from, ?Track $track = null): void
+    public function packageAhead(int $variant, int $from, ?Track $track = null, int $stream = 0): void
     {
         $count = $this->lookAhead ?? Config::integer('media.delivery.look_ahead', 0);
         $strategy = $this->lookAheadStrategy ?? LookAheadStrategy::tryFrom((string) Config::get('media.delivery.look_ahead_via'));
@@ -977,7 +1020,7 @@ class DirectStream
         $missing = [];
 
         foreach (array_slice($this->segments($variant), max(0, $from), $count) as $segment) {
-            if (! $this->cacheDisk()->exists($this->segmentPath($media, $segment, $track))) {
+            if (! $this->cacheDisk()->exists($this->segmentPath($media, $segment, $track, $stream))) {
                 $missing[] = $segment->index;
             }
         }
@@ -991,7 +1034,7 @@ class DirectStream
             $queue = Config::get('media.delivery.look_ahead_queue');
 
             Bus::dispatch(
-                new PackageSegments($media->disk()->name(), $media->path(), $missing, $track, $this->targetDuration(), $this->cacheDisk()->name())
+                new PackageSegments($media->disk()->name(), $media->path(), $missing, $track, $this->targetDuration(), $this->cacheDisk()->name(), $stream)
                     ->onConnection(is_string($connection) ? $connection : null)
                     ->onQueue(is_string($queue) ? $queue : null),
             );
@@ -999,10 +1042,10 @@ class DirectStream
             return;
         }
 
-        defer(function () use ($variant, $missing, $track): void {
+        defer(function () use ($variant, $missing, $track, $stream): void {
             foreach ($missing as $index) {
                 try {
-                    $this->segment($variant, $index, $track);
+                    $this->segment($variant, $index, $track, $stream);
                 } catch (Throwable $exception) {
                     report($exception);
 
@@ -1025,7 +1068,7 @@ class DirectStream
         }
 
         if (($audio = $this->audioVariant()) !== null) {
-            $this->packageAhead($audio, 0, Track::Audio);
+            $this->packageAhead($audio, 0, Track::Audio, $this->defaultAudioStream($audio));
         }
     }
 
@@ -1116,7 +1159,7 @@ class DirectStream
      *
      * @throws InvalidMediaException
      */
-    protected function packageFragment(Media $media, Segment $segment, Track $track, string $path): void
+    protected function packageFragment(Media $media, Segment $segment, Track $track, int $stream, string $path): void
     {
         $directory = $this->directories->create();
         $output = $directory->path('fragment.mp4');
@@ -1131,7 +1174,7 @@ class DirectStream
                 '-t', Number::format($segment->duration),
                 '-copyts',
                 '-i', $media->inputPath(),
-                '-map', $track->map(),
+                '-map', $track->map($stream),
                 ...($track === Track::IFrames ? ['-frames:v', '1'] : []),
                 '-c', 'copy',
                 ...($track->isVideo() && $this->opener->probe($media->path())->videoStream()?->codecName === 'hevc' ? ['-tag:v', 'hvc1'] : []),
@@ -1150,7 +1193,7 @@ class DirectStream
             file_put_contents($directory->path(basename($path)), $parts['media']);
 
             // Every fragment of a track carries the same initialization segment, so it's written once.
-            if (! $this->cacheDisk()->exists($this->initPath($media, $track))) {
+            if (! $this->cacheDisk()->exists($this->initPath($media, $track, $stream))) {
                 file_put_contents($directory->path('init.mp4'), $parts['init']);
             }
 
@@ -1163,16 +1206,16 @@ class DirectStream
     /**
      * Where a segment is cached: per file version, so a changed file gets new segments.
      */
-    protected function segmentPath(Media $media, Segment $segment, ?Track $track = null): string
+    protected function segmentPath(Media $media, Segment $segment, ?Track $track = null, int $stream = 0): string
     {
         return $track !== null
-            ? "{$this->cachePrefix($media)}/{$track->value}/{$segment->index}.m4s"
+            ? "{$this->cachePrefix($media)}/{$track->name($stream)}/{$segment->index}.m4s"
             : "{$this->cachePrefix($media)}/{$segment->index}.ts";
     }
 
-    protected function initPath(Media $media, Track $track): string
+    protected function initPath(Media $media, Track $track, int $stream = 0): string
     {
-        return "{$this->cachePrefix($media)}/{$track->value}/init.mp4";
+        return "{$this->cachePrefix($media)}/{$track->name($stream)}/init.mp4";
     }
 
     protected function cachePrefix(Media $media, bool $withDuration = true): string
@@ -1418,14 +1461,14 @@ class DirectStream
     /**
      * @throws InvalidMediaException
      */
-    protected function ensureStreamable(Media $media, ?Track $track = null): void
+    protected function ensureStreamable(Media $media, ?Track $track = null, int $stream = 0): void
     {
         $probe = $this->opener->probe($media->path());
 
         $streams = match ($track) {
             null => [$probe->videoStream(), $probe->audioStream()],
-            Track::Video, Track::IFrames => [$probe->videoStream()],
-            Track::Audio => [$probe->audioStream()],
+            Track::Video, Track::IFrames => [$probe->videoStreams()[$stream] ?? null],
+            Track::Audio => [$probe->audioStreams()[$stream] ?? null],
         };
 
         foreach ($streams as $stream) {
@@ -1446,12 +1489,12 @@ class DirectStream
     /**
      * @throws SegmentNotFoundException
      */
-    protected function ensureTrack(int $variant, Track $track): void
+    protected function ensureTrack(int $variant, Track $track, int $stream = 0): void
     {
         $probe = $this->probe($variant);
 
-        if (! ($track->isVideo() ? $probe->hasVideo() : $probe->hasAudio())) {
-            throw SegmentNotFoundException::forTrack($variant, $track->value);
+        if ((($track->isVideo() ? $probe->videoStreams() : $probe->audioStreams())[$stream] ?? null) === null) {
+            throw SegmentNotFoundException::forTrack($variant, $track->name($stream));
         }
     }
 
@@ -1470,10 +1513,10 @@ class DirectStream
     /**
      * @throws InvalidMediaException
      */
-    protected function ensureEncryptable(int $variant, Track $track): void
+    protected function ensureEncryptable(int $variant, Track $track, int $stream = 0): void
     {
         $probe = $this->probe($variant);
-        $codec = ($track->isVideo() ? $probe->videoStream() : $probe->audioStream())?->codecName;
+        $codec = (($track->isVideo() ? $probe->videoStreams() : $probe->audioStreams())[$stream] ?? null)?->codecName;
 
         if ($this->keys !== null && FragmentedMp4Codec::tryFrom((string) $codec)?->isEncryptable() === false) {
             throw InvalidMediaException::notEncryptable((string) $codec);
@@ -1506,29 +1549,29 @@ class DirectStream
     /**
      * A DASH representation of a track, with its segments listed on a millisecond timeline.
      *
-     * @param  callable(int, Track): string  $initUrl
-     * @param  callable(Segment, int, Track): string  $segmentUrl
+     * @param  callable(int, Track, int): string  $initUrl
+     * @param  callable(Segment, int, Track, int): string  $segmentUrl
      */
-    protected function representation(int $variant, Track $track, callable $initUrl, callable $segmentUrl): string
+    protected function representation(int $variant, Track $track, callable $initUrl, callable $segmentUrl, int $stream = 0): string
     {
         $probe = $this->probe($variant);
-        $stream = ($track->isVideo() ? $probe->videoStream() : $probe->audioStream()) ?? throw SegmentNotFoundException::forTrack($variant, $track->value);
-        $codecs = $track->isVideo() ? Codecs::video($stream) : Codecs::audio($stream);
+        $probed = (($track->isVideo() ? $probe->videoStreams() : $probe->audioStreams())[$stream] ?? null) ?? throw SegmentNotFoundException::forTrack($variant, $track->name($stream));
+        $codecs = $track->isVideo() ? Codecs::video($probed) : Codecs::audio($probed);
         $segments = $this->segments($variant);
         $offset = FragmentedMp4::TIMESTAMP_OFFSET * 1000;
 
         $attributes = array_filter([
-            'id' => "{$track->value}-{$variant}",
+            'id' => "{$track->name($stream)}-{$variant}",
             'codecs' => $codecs,
             'bandwidth' => (string) match ($track) {
-                Track::Audio => $stream->bitRate ?? 128000,
+                Track::Audio => $probed->bitRate ?? 128000,
                 Track::IFrames => $this->iFrameBandwidth($variant),
                 Track::Video => $this->bandwidth($this->opener->paths()[$variant]),
             },
-            'width' => $stream instanceof VideoStream && $stream->width !== null ? (string) $stream->width : null,
-            'height' => $stream instanceof VideoStream && $stream->height !== null ? (string) $stream->height : null,
-            'frameRate' => $track === Track::Video && $stream instanceof VideoStream && preg_match('#^[1-9]\d*(/[1-9]\d*)?$#', (string) $stream->get('avg_frame_rate')) === 1 ? (string) $stream->get('avg_frame_rate') : null,
-            'audioSamplingRate' => $stream instanceof AudioStream && $stream->sampleRate !== null ? (string) $stream->sampleRate : null,
+            'width' => $probed instanceof VideoStream && $probed->width !== null ? (string) $probed->width : null,
+            'height' => $probed instanceof VideoStream && $probed->height !== null ? (string) $probed->height : null,
+            'frameRate' => $track === Track::Video && $probed instanceof VideoStream && preg_match('#^[1-9]\d*(/[1-9]\d*)?$#', (string) $probed->get('avg_frame_rate')) === 1 ? (string) $probed->get('avg_frame_rate') : null,
+            'audioSamplingRate' => $probed instanceof AudioStream && $probed->sampleRate !== null ? (string) $probed->sampleRate : null,
             'maxPlayoutRate' => $track === Track::IFrames ? (string) $this->iFramePlayoutRate() : null,
             'codingDependency' => $track === Track::IFrames ? 'false' : null,
         ]);
@@ -1550,11 +1593,11 @@ class DirectStream
         $lines = [
             '      <Representation '.implode(' ', array_map(fn (string $key, string $value): string => "{$key}=\"{$this->xml($value)}\"", array_keys($attributes), $attributes)).'>',
             '        <SegmentList timescale="1000" presentationTimeOffset="'.$offset.'">',
-            '          <Initialization sourceURL="'.$this->xml($initUrl($variant, $track)).'"/>',
+            '          <Initialization sourceURL="'.$this->xml($initUrl($variant, $track, $stream)).'"/>',
             '          <SegmentTimeline>',
             ...array_map(fn (array $s): string => '            <S t="'.$s['t'].'" d="'.$s['d'].'"'.($s['r'] > 0 ? ' r="'.$s['r'].'"' : '').'/>', $timeline),
             '          </SegmentTimeline>',
-            ...array_map(fn (Segment $segment): string => '          <SegmentURL media="'.$this->xml($segmentUrl($segment, $variant, $track)).'"/>', $segments),
+            ...array_map(fn (Segment $segment): string => '          <SegmentURL media="'.$this->xml($segmentUrl($segment, $variant, $track, $stream)).'"/>', $segments),
             '        </SegmentList>',
             '      </Representation>',
         ];
@@ -1592,6 +1635,63 @@ class DirectStream
         }
 
         return null;
+    }
+
+    /**
+     * The audio streams a variant offers as audio tracks, keyed by their position among its audio
+     * streams. Streams fragmented MP4 can't carry are left out, unless none is left.
+     *
+     * @return array<int, AudioStream>
+     *
+     * @throws SegmentNotFoundException
+     */
+    protected function audioStreams(int $variant): array
+    {
+        $all = $this->probe($variant)->audioStreams();
+
+        $streams = array_filter($all, fn (AudioStream $stream, int $position): bool => FragmentedMp4Codec::supports($stream->codecName)
+            && ($this->audioSelection === null
+                || in_array($position, $this->audioSelection, true)
+                || ($stream->language !== null && in_array($stream->language, $this->audioSelection, true))), ARRAY_FILTER_USE_BOTH);
+
+        return $streams !== [] ? $streams : array_slice($all, 0, 1, true);
+    }
+
+    /**
+     * The position of the audio stream players start with: the one marked as default, or the first.
+     *
+     * @throws SegmentNotFoundException
+     */
+    protected function defaultAudioStream(int $variant): int
+    {
+        $streams = $this->audioStreams($variant);
+
+        foreach ($streams as $position => $stream) {
+            if ((int) $stream->get('disposition.default', 0) === 1) {
+                return $position;
+            }
+        }
+
+        return array_key_first($streams) ?? 0;
+    }
+
+    /**
+     * A unique name per audio stream: its title, its language, or its number.
+     *
+     * @param  array<int, AudioStream>  $streams
+     * @return array<int, string>
+     */
+    protected function audioLabels(array $streams): array
+    {
+        $labels = [];
+
+        foreach ($streams as $position => $stream) {
+            $label = $stream->tags['title'] ?? ($stream->language !== null && $stream->language !== 'und' ? $stream->language : null) ?? (count($streams) > 1 ? 'Audio '.($position + 1) : 'Audio');
+
+            $labels[$position] = in_array($label, $labels, true) ? "{$label} ".($position + 1) : $label;
+        }
+
+        return $labels;
     }
 
     /**

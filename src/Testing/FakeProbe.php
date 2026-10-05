@@ -14,6 +14,7 @@ final class FakeProbe
      *
      * @param  list<string>  $subtitles  Languages of subtitle tracks, e.g. ['eng', 'nld'].
      * @param  string|null  $transfer  A colour transfer such as "smpte2084" to make the video HDR.
+     * @param  list<string>  $audioLanguages  Languages of audio tracks, e.g. ['eng', 'jpn'], in place of the one without a language; the first is the default.
      * @return array<string, mixed>
      */
     public static function video(
@@ -25,6 +26,7 @@ final class FakeProbe
         array $subtitles = [],
         ?string $transfer = null,
         float $frameRate = 30.0,
+        array $audioLanguages = [],
     ): array {
         $streams = [[
             'index' => 0,
@@ -39,8 +41,12 @@ final class FakeProbe
             ...($transfer !== null ? ['color_transfer' => $transfer, 'color_primaries' => 'bt2020', 'color_space' => 'bt2020nc'] : []),
         ]];
 
-        if ($audio) {
+        if ($audio && $audioLanguages === []) {
             $streams[] = self::audioStream(count($streams), $duration);
+        }
+
+        foreach ($audio ? $audioLanguages : [] as $position => $language) {
+            $streams[] = [...self::audioStream(count($streams), $duration), 'tags' => ['language' => $language], 'disposition' => ['default' => $position === 0 ? 1 : 0]];
         }
 
         foreach ($subtitles as $language) {

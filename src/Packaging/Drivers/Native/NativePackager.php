@@ -134,6 +134,7 @@ class NativePackager implements Packager
             ->stream()
             ->fragmented()
             ->lookAhead(0)
+            ->withAudioStreams([0])
             ->tracksFrom(array_values(array_unique(array_map($variant, $videos))), $audio !== null ? $variant($audio) : null);
 
         if ($spec->segmentDuration !== null) {

@@ -15,14 +15,20 @@ enum Track: string
     case IFrames = 'iframes';
 
     /**
-     * The ffmpeg stream specifier of the track's first stream.
+     * The ffmpeg stream specifier of one of the track's streams, the first by default.
      */
-    public function map(): string
+    public function map(int $stream = 0): string
     {
-        return match ($this) {
-            self::Video, self::IFrames => '0:v:0',
-            self::Audio => '0:a:0',
-        };
+        return ($this->isVideo() ? '0:v:' : '0:a:').$stream;
+    }
+
+    /**
+     * The name of the track for one of its streams, in URLs and cache paths: the track itself for
+     * the first stream, e.g. "audio", and with the stream's position for the others, e.g. "audio-1".
+     */
+    public function name(int $stream = 0): string
+    {
+        return $stream > 0 ? "{$this->value}-{$stream}" : $this->value;
     }
 
     public function isVideo(): bool

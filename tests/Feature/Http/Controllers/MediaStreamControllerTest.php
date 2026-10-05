@@ -124,6 +124,18 @@ it('serves the i-frames track of cmaf streams with trick play', function () {
     $this->get('videos/1/dash.mpd')->assertSee('http://localhost/videos/1/0/iframes/init.mp4');
 });
 
+it('serves every audio stream as a track of its own', function () {
+    Media::fake(['video-1.mp4' => FakeProbe::video(duration: 13, audioLanguages: ['eng', 'jpn'])]);
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"));
+
+    $this->get('videos/1/cmaf.m3u8')->assertSee('URI="http://localhost/videos/1/0/audio-1/index.m3u8"', escape: false);
+    $this->get('videos/1/0/audio-1/index.m3u8')->assertOk()->assertSee(['http://localhost/videos/1/0/audio-1/init.mp4', 'http://localhost/videos/1/0/audio-1/2.m4s']);
+    $this->get('videos/1/0/audio-1/1.m4s')->assertOk()->assertHeader('Content-Type', 'audio/mp4');
+    $this->get('videos/1/0/audio-1/init.mp4')->assertOk();
+    $this->get('videos/1/0/audio-2/init.mp4')->assertNotFound();
+    $this->get('videos/1/0/video-1/init.mp4')->assertNotFound();
+});
+
 it('serves a dash manifest with signed segment urls', function () {
     MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"))->signed();
 

@@ -21,3 +21,12 @@ it('builds a silent video and an audio-only file', function () {
         ->hasVideo()->toBeFalse()
         ->audioStream()->codecName->toBe('opus');
 });
+
+it('builds a video with an audio stream per language, the first as the default', function () {
+    $streams = Probe::fromArray(FakeProbe::video(audioLanguages: ['eng', 'jpn']))->audioStreams();
+
+    expect($streams)->toHaveCount(2)
+        ->and($streams[0])->language->toBe('eng')->get('disposition.default')->toBe(1)
+        ->and($streams[1])->language->toBe('jpn')->get('disposition.default')->toBe(0)
+        ->and(Probe::fromArray(FakeProbe::video(audio: false, audioLanguages: ['eng']))->hasAudio())->toBeFalse();
+});

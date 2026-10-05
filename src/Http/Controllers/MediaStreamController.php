@@ -51,8 +51,8 @@ class MediaStreamController
         [$definition, $stream] = $this->resolve($request);
 
         return $this->playlistResponse($stream->fragmented($fragmented)->masterPlaylist(
-            fn (int $variant, ?Track $track): string => $track !== null
-                ? $this->url($request, $definition, 'track-playlist', ['variant' => $variant, 'track' => $track->value])
+            fn (int $variant, ?Track $track, int $stream): string => $track !== null
+                ? $this->url($request, $definition, 'track-playlist', ['variant' => $variant, 'track' => $track->name($stream)])
                 : $this->url($request, $definition, 'playlist', ['variant' => $variant]),
             fn (int $subtitle): string => $this->url($request, $definition, 'subtitle-playlist', ['subtitle' => $subtitle, 'format' => $fragmented ? 'cmaf' : 'hls']),
             fn (): string => $this->url($request, $definition, 'thumbnail-playlist', []),
@@ -83,17 +83,18 @@ class MediaStreamController
     public function trackPlaylist(Request $request): Response
     {
         [$definition, $stream] = $this->resolve($request);
-        $track = $this->track($request);
+        [$track, $position] = $this->track($request);
         $variant = $this->number($request, 'variant');
 
         $response = $this->playlistResponse($stream->mediaPlaylist(
             $variant,
-            fn (Segment $segment, int $variant): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->value, 'segment' => $segment->index]),
+            fn (Segment $segment, int $variant): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->name($position), 'segment' => $segment->index]),
             $track,
-            fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->value]),
+            fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->name($position)]),
+            $position,
         ));
 
-        $stream->packageAhead($variant, 0, $track);
+        $stream->packageAhead($variant, 0, $track, $position);
 
         return $response;
     }
@@ -103,8 +104,8 @@ class MediaStreamController
         [$definition, $stream] = $this->resolve($request);
 
         $response = new Response($stream->dashManifest(
-            fn (int $variant, Track $track): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->value]),
-            fn (Segment $segment, int $variant, Track $track): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->value, 'segment' => $segment->index]),
+            fn (int $variant, Track $track, int $stream): string => $this->url($request, $definition, 'init', ['variant' => $variant, 'track' => $track->name($stream)]),
+            fn (Segment $segment, int $variant, Track $track, int $stream): string => $this->url($request, $definition, 'fragment', ['variant' => $variant, 'track' => $track->name($stream), 'segment' => $segment->index]),
             fn (int $subtitle): string => $this->url($request, $definition, 'subtitle', ['subtitle' => $subtitle]),
             fn (int $sheet): string => $this->thumbnailUrl($request, $definition, $stream, $sheet),
         ), 200, [
@@ -187,14 +188,18 @@ class MediaStreamController
     {
         [, $stream] = $this->resolve($request);
 
-        return $stream->initSegmentResponse($this->number($request, 'variant'), $this->track($request));
+        [$track, $position] = $this->track($request);
+
+        return $stream->initSegmentResponse($this->number($request, 'variant'), $track, $position);
     }
 
     public function fragment(Request $request): Response
     {
         [, $stream] = $this->resolve($request);
 
-        return $stream->segmentResponse($this->number($request, 'variant'), $this->number($request, 'segment'), $this->track($request));
+        [$track, $position] = $this->track($request);
+
+        return $stream->segmentResponse($this->number($request, 'variant'), $this->number($request, 'segment'), $track, $position);
     }
 
     public function segment(Request $request): Response
@@ -280,9 +285,18 @@ class MediaStreamController
         ]);
     }
 
-    protected function track(Request $request): Track
+    /**
+     * The track and the position of its stream, from a track name like "audio" or "audio-1".
+     *
+     * @return array{Track, int}
+     */
+    protected function track(Request $request): array
     {
-        return Track::tryFrom($this->parameter($request, 'track')) ?? throw new NotFoundHttpException('Unknown track.');
+        if (preg_match('/^([a-z]+)(?:-([1-9]\d*))?$/', $this->parameter($request, 'track'), $matches) !== 1 || ($track = Track::tryFrom($matches[1])) === null) {
+            throw new NotFoundHttpException('Unknown track.');
+        }
+
+        return [$track, (int) ($matches[2] ?? 0)];
     }
 
     protected function number(Request $request, string $parameter): int

@@ -18,3 +18,10 @@ it('takes i-frames from the first video stream', function () {
         ->and(Track::Video->isVideo())->toBeTrue()
         ->and(Track::Audio->isVideo())->toBeFalse();
 });
+
+it('maps and names the other streams of a track by their position', function () {
+    expect(Track::Audio->map(2))->toBe('0:a:2')
+        ->and(Track::Video->map(1))->toBe('0:v:1')
+        ->and(Track::Audio->name())->toBe('audio')
+        ->and(Track::Audio->name(2))->toBe('audio-2');
+});

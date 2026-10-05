@@ -274,6 +274,42 @@ it('marks the media playlist of the i-frames track as i-frames only', function (
         ->not->toContain('#EXT-X-INDEPENDENT-SEGMENTS');
 });
 
+it('lists an audio rendition per audio stream with its language', function () {
+    Media::fake(['movie.mkv' => FakeProbe::video(audioLanguages: ['eng', 'jpn', 'jpn'])]);
+
+    $playlist = Media::fromDisk('videos')->open('movie.mkv')->stream()->fragmented()
+        ->masterPlaylist(fn (int $variant, ?Track $track, int $stream) => "{$variant}/{$track?->name($stream)}.m3u8");
+
+    expect($playlist)->toContain(implode("\n", [
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="eng",LANGUAGE="eng",DEFAULT=YES,AUTOSELECT=YES,URI="0/audio.m3u8"',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="jpn",LANGUAGE="jpn",DEFAULT=NO,AUTOSELECT=YES,URI="0/audio-1.m3u8"',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="jpn 3",LANGUAGE="jpn",DEFAULT=NO,AUTOSELECT=YES,URI="0/audio-2.m3u8"',
+        '#EXT-X-STREAM-INF:BANDWIDTH=4950000,RESOLUTION=1920x1080,FRAME-RATE=30.000,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio"',
+    ]));
+});
+
+it('offers the audio streams picked by position or language, leaving out codecs fragmented mp4 cannot carry', function () {
+    $probe = FakeProbe::video(audioLanguages: ['eng', 'jpn', 'nld']);
+    $probe['streams'][3]['codec_name'] = 'truehd';
+    Media::fake(['movie.mkv' => $probe]);
+    $stream = Media::fromDisk('videos')->open('movie.mkv')->stream()->fragmented();
+    $playlistUrl = fn (int $variant, ?Track $track, int $stream) => "{$variant}/{$track?->name($stream)}.m3u8";
+
+    expect($stream->masterPlaylist($playlistUrl))->toContain('0/audio.m3u8')->toContain('0/audio-1.m3u8')->not->toContain('0/audio-2.m3u8')
+        ->and($stream->withAudioStreams(['jpn'])->masterPlaylist($playlistUrl))->toContain('NAME="jpn",LANGUAGE="jpn",DEFAULT=YES')->not->toContain('0/audio.m3u8')
+        ->and($stream->withAudioStreams([0])->masterPlaylist($playlistUrl))->toContain('NAME="eng"')->not->toContain('audio-1');
+});
+
+it('copies a later audio stream into its own track', function () {
+    Media::fake(['movie.mkv' => FakeProbe::video(duration: 13, audioLanguages: ['eng', 'jpn'])]);
+    $stream = Media::fromDisk('videos')->open('movie.mkv')->stream();
+
+    expect($stream->segment(0, 1, Track::Audio, 1))->toMatch('#^media-segments/[0-9a-f]{32}/6/audio-1/1\.m4s$#')
+        ->and($stream->initSegment(0, Track::Audio, 1))->toEndWith('/audio-1/init.mp4')
+        ->and(fn () => $stream->segment(0, 1, Track::Audio, 2))->toThrow(SegmentNotFoundException::class, 'Variant 0 has no audio-2 track.');
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 12, 2) === ['-map', '0:a:1']);
+});
+
 it('lists the audio track as the variant of fragmented audio', function () {
     Media::fake(['song.m4a' => FakeProbe::audio()]);
 
@@ -444,6 +480,31 @@ function cacheFragmentedTrack(DirectStream $stream, int $segment, Track $track, 
 
     return $fragments;
 }
+
+it('adds an audio adaptation set per audio stream to the dash manifest', function () {
+    Media::fake(['movie.mkv' => FakeProbe::video(duration: 13, audioLanguages: ['eng', 'jpn'], subtitles: ['eng'])]);
+
+    $manifest = Media::fromDisk('videos')->open('movie.mkv')->stream()->withEmbeddedSubtitles()->dashManifest(
+        fn (int $variant, Track $track, int $stream) => "{$variant}/{$track->name($stream)}/init.mp4",
+        fn (Segment $segment, int $variant, Track $track, int $stream) => "{$variant}/{$track->name($stream)}/{$segment->index}.m4s",
+        fn (int $subtitle) => "{$subtitle}.vtt",
+    );
+
+    expect($manifest)->toContain(implode("\n", [
+        '    <AdaptationSet id="1" contentType="audio" mimeType="audio/mp4" lang="eng" startWithSAP="1">',
+        '      <Label>eng</Label>',
+        '      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>',
+        '      <Representation id="audio-0" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="48000">',
+    ]))
+        ->toContain(implode("\n", [
+            '    <AdaptationSet id="2" contentType="audio" mimeType="audio/mp4" lang="jpn" startWithSAP="1">',
+            '      <Label>jpn</Label>',
+            '      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="alternate"/>',
+            '      <Representation id="audio-1-0" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="48000">',
+        ]))
+        ->toContain('<Initialization sourceURL="0/audio-1/init.mp4"/>')
+        ->toContain('<AdaptationSet id="3" contentType="text"');
+});
 
 it('adds a trick mode adaptation set of the i-frames to the dash manifest', function () {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
