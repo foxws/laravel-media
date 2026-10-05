@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.1.2 - 2026-10-05
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Encrypt samples whose ciphertext is the string zero by @francoism90 in https://github.com/foxws/laravel-media/pull/45
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.1.1...0.1.2
+
 ## 0.1.1 - 2026-10-05
 
 <!-- Release notes generated using configuration in .github/release.yml at 2e9004fcb3abe65c6a3ace2df3f6953c572a5dcb -->
