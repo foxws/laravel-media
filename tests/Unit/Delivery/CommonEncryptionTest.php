@@ -48,6 +48,16 @@ it('encrypts audio samples whole with an iv per sample', function () {
         ->and(strlen(mp4Boxes($segment)['mdat']))->toBe(strlen(mp4Boxes($track['media'])['mdat']));
 });
 
+it('encrypts a sample whose ciphertext is the string zero', function () {
+    $key = new EncryptionKey(str_repeat('0', 32), str_repeat('0', 32));
+    $track = fragmentedTrack('mp4a', ['c']);
+
+    $segment = CommonEncryption::segment($track['init'], $track['media'], $key, '0|audio|564');
+
+    expect(decryptCenc($segment, $key)['samples'])->toBe(['c'])
+        ->and(mp4Boxes($segment)['mdat'])->toEndWith('0');
+});
+
 it('leaves the nal headers and non-slice nal units of h264 readable', function () {
     $key = EncryptionKey::generate();
     $sample = nalUnit(0x67, 12).nalUnit(0x65, 40).nalUnit(0x41, 8);
