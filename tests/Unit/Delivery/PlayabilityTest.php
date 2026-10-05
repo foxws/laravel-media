@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Delivery\Playability;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Testing\FakeProbe;
 
@@ -86,6 +87,45 @@ it('encodes the video with the configured codec', function () {
     config(['media.playback.preset' => null, 'media.playback.video_codec' => 'libx265']);
 
     expect(playability(['codec_name' => 'mpeg2video'])->format()->toArguments())->toContain('24', 'medium');
+});
+
+it('encodes on the cpu unless a gpu is configured', function (mixed $hardware, HardwareAcceleration $expected) {
+    config(['media.playback.hardware' => $hardware]);
+
+    expect(playability()->hardware())->toBe($expected);
+})->with([
+    'null' => [null, HardwareAcceleration::None],
+    'none' => ['none', HardwareAcceleration::None],
+    'unknown' => ['unknown', HardwareAcceleration::None],
+    'vaapi' => ['vaapi', HardwareAcceleration::Vaapi],
+]);
+
+it('encodes the video on the gpu with the quality of its encoder', function () {
+    config(['media.playback.hardware' => 'vaapi']);
+
+    expect(playability(['codec_name' => 'mpeg2video'])->format()->toArguments())->toBe([
+        '-c:a', 'copy',
+        '-c:v', 'h264_vaapi', '-rc_mode', 'CQP', '-qp', '20', '-c:s', 'copy',
+    ]);
+
+    config(['media.playback.hardware' => 'nvenc', 'media.playback.video_codec' => 'libx265', 'media.playback.preset' => 'p5']);
+
+    expect(playability(['codec_name' => 'mpeg2video'], ['dts'])->format()->toArguments())->toBe([
+        '-preset', 'p5', '-c:a', 'copy',
+        '-c:v', 'hevc_nvenc', '-rc', 'vbr', '-cq', '24', '-b:v', '0', '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1',
+        '-c:a:0', 'aac', '-b:a:0', '192k', '-c:s', 'copy',
+    ]);
+
+    config(['media.playback.hardware' => 'qsv', 'media.playback.preset' => null, 'media.playback.video_codec' => 'libsvtav1']);
+
+    expect(playability(['codec_name' => 'mpeg2video'])->format()->toArguments())->toContain('av1_qsv', '-global_quality', '30', 'medium');
+});
+
+it('copies video that plays without a gpu', function () {
+    config(['media.playback.hardware' => 'vaapi']);
+
+    expect(playability(audio: ['dts'])->format()->toArguments())->toContain('-c:v', 'copy')
+        ->not->toContain('h264_vaapi');
 });
 
 it('defaults av1 to preset 8', function () {

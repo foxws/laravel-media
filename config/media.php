@@ -115,6 +115,8 @@ return [
     | that don't play are re-encoded by $opener->makePlayable(): video with
     | video_codec ("libx264", "libx265" or "libsvtav1") at the crf and preset
     | (the codec's defaults when null), audio as AAC at audio_bitrate kbit/s.
+    | Set hardware to "vaapi", "nvenc" or "qsv" to encode that video on the
+    | GPU (decoding stays on the CPU); null or "none" encodes on the CPU.
     |
     */
 
@@ -125,6 +127,7 @@ return [
         'crf' => env('MEDIA_PLAYBACK_CRF'),
         'preset' => env('MEDIA_PLAYBACK_PRESET'),
         'audio_bitrate' => (int) env('MEDIA_PLAYBACK_AUDIO_BITRATE', 192),
+        'hardware' => env('MEDIA_PLAYBACK_HARDWARE'),
     ],
 
     /*
