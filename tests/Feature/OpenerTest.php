@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -117,6 +118,21 @@ it('encodes a ladder in one ffmpeg run with an output per rendition that fits', 
         && count(array_keys($arguments, '-map', true)) === 6
         && in_array('scale_vaapi=w=-2:h=480', $arguments, true)
         && in_array('h264_vaapi', $arguments, true));
+});
+
+it('aligns a ladder to the segments of the source, so every variant is split the same way', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 20)]);
+    Storage::fake('renditions');
+
+    $media = Media::fromDisk('renditions')->open('video.mp4');
+
+    $media->ladder(Ladder::standard()->alignToSource(), 'videos/1/{height}p.mp4')->toDisk('renditions')->save();
+
+    $forced = collect(Media::commands(Executable::FFMpeg)[0])->after(fn (string $argument) => $argument === '-force_key_frames');
+    $rendition = new KeyframeIndex(array_map(fn (string $second): float => (float) $second + 0.001, explode(',', (string) $forced)), 20.0);
+
+    expect($forced)->toBe('0,5.999,11.999,17.999')
+        ->and($rendition->segments())->toEqual($media->keyframes()->segments());
 });
 
 it('needs a video stream for a ladder', function () {

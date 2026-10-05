@@ -119,6 +119,17 @@ Ladder::standard()->codec(VideoCodec::Av1)->hardware(HardwareAcceleration::Vaapi
 
 - **Sizes:** a rendition is a short side and a bitrate in kbit/s. Portrait video is scaled on its width. Renditions larger than the source are skipped, so nothing is upscaled.
 - **Keyframes:** every rendition gets keyframes at the same times (every `media.delivery.segment_duration` seconds by default, with scene-cut keyframes off), so players can switch between them at every segment.
+- **Keeping the source:** `->alignToSource()` places the keyframes where the source's [direct stream](streaming.md) segments start instead, so the source can be streamed unchanged as the top variant, with only smaller sizes encoded:
+
+```php
+$media = Media::fromDisk('videos')->open('movie.mp4');
+
+$media->ladder(new Ladder([new Rendition(720, 2800), new Rendition(480, 1400)])->alignToSource(), 'renditions/{height}p.mp4')->save();
+
+Media::fromDisk('videos')->open(['movie.mp4', 'renditions/720p.mp4', 'renditions/480p.mp4'])->stream();
+```
+
+  Stream them with the same segment duration the ladder used. `->keyframesAt([0, 6.2, 12.4])` places keyframes at times of your own.
 - **Codecs:** H.264 (the default), HEVC or AV1, with AAC audio in MP4.
 - **GPU encoding:** set `MEDIA_LADDER_HARDWARE` to `vaapi`, `nvenc` or `qsv`, or call `hardware()`, to decode, scale and encode on the GPU. VAAPI uses `MEDIA_LADDER_VAAPI_DEVICE` (`/dev/dri/renderD128`).
 
