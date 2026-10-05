@@ -61,6 +61,13 @@ it('copies what plays and encodes only the audio that does not', function () {
     ]);
 });
 
+it('leaves the video and subtitles out of an audio only format', function () {
+    expect(playability(audio: ['aac', 'dts'])->format(audioOnly: true)->toArguments())->toBe([
+        '-vn', '-c:a', 'copy', '-sn',
+        '-c:a:1', 'aac', '-b:a:1', '192k',
+    ]);
+});
+
 it('encodes the video with the configured codec', function () {
     expect(playability(['codec_name' => 'mpeg2video'])->format()->toArguments())->toBe([
         '-c:v', 'libx264', '-crf', '20', '-preset', 'medium', '-c:a', 'copy',

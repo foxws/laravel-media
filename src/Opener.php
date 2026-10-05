@@ -216,16 +216,25 @@ class Opener
     /**
      * Copy the (first) opened file with every stream browsers can't play re-encoded, see
      * playability(). Text subtitles are kept in containers other than MP4 and MOV, which can't
-     * carry them as they are, so an MKV output keeps every stream.
+     * carry them as they are, so an MKV output keeps every stream. Audio only writes just the
+     * audio streams, to stream next to the untouched file with tracksFrom(), when its video plays.
+     *
+     * @throws InvalidMediaException
      */
-    public function makePlayable(string $path): FFMpegBuilder
+    public function makePlayable(string $path, bool $audioOnly = false): FFMpegBuilder
     {
         $playability = $this->playability();
-        $subtitles = ! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['mp4', 'm4v', 'mov'], true);
+
+        if ($audioOnly && $playability->needsVideoEncoding()) {
+            throw InvalidMediaException::videoNotPlayable($this->mediaFor()->path());
+        }
+
+        $subtitles = ! $audioOnly && ! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['mp4', 'm4v', 'mov'], true);
+        $maps = $audioOnly ? ['0:a'] : ['0:V:0?', '0:a?', ...($subtitles ? ['0:s?'] : [])];
 
         return $this->ffmpeg()->addOutput($path, fn (Output $output): Output => $output
-            ->map('0:V:0?', '0:a?', ...($subtitles ? ['0:s?'] : []))
-            ->inFormat($playability->format()));
+            ->map(...$maps)
+            ->inFormat($playability->format($audioOnly)));
     }
 
     /**

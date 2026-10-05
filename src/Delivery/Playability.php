@@ -57,12 +57,19 @@ final readonly class Playability
 
     /**
      * The output format that copies the streams that play and re-encodes the others: the video
-     * with media.playback.video_codec, and each audio stream that doesn't play as AAC.
+     * with media.playback.video_codec, and each audio stream that doesn't play as AAC. Audio only
+     * leaves the video and subtitles out, for a file that gives a stream its audio tracks.
      */
-    public function format(): Format
+    public function format(bool $audioOnly = false): Format
     {
-        $codec = $this->needsVideoEncoding() ? $this->videoCodec() : VideoCodec::Copy;
         $bitrate = (string) Config::integer('media.playback.audio_bitrate', 192).'k';
+        $audio = array_merge(...array_map(fn (int $position): array => ["-c:a:{$position}", AudioCodec::Aac->value, "-b:a:{$position}", $bitrate], $this->audioNeedingEncoding()));
+
+        if ($audioOnly) {
+            return new Format(audioCodec: AudioCodec::Copy, withoutVideo: true, withoutSubtitles: true, arguments: $audio);
+        }
+
+        $codec = $this->needsVideoEncoding() ? $this->videoCodec() : VideoCodec::Copy;
 
         return new Format(
             videoCodec: $codec,
@@ -72,7 +79,7 @@ final readonly class Playability
             arguments: [
                 ...($codec === VideoCodec::H264 ? ['-pix_fmt', 'yuv420p'] : []),
                 ...($codec === VideoCodec::Hevc ? ['-tag:v', 'hvc1'] : []),
-                ...array_merge(...array_map(fn (int $position): array => ["-c:a:{$position}", AudioCodec::Aac->value, "-b:a:{$position}", $bitrate], $this->audioNeedingEncoding())),
+                ...$audio,
                 '-c:s', 'copy',
             ],
         );

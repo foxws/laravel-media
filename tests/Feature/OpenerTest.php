@@ -159,6 +159,24 @@ it('makes a file playable, keeping subtitles in containers that carry them', fun
         ->and($mp4)->not->toContain('0:s?');
 });
 
+it('makes only the audio playable, to stream next to the untouched video', function () {
+    Media::fake(['movie.mkv' => FakeProbe::video(audioLanguages: ['eng', 'jpn'])]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('movie.mkv')->makePlayable('movie-audio.m4a', audioOnly: true)->save();
+
+    Media::assertSaved('movie-audio.m4a', 'videos');
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('0:a', $arguments, true)
+        && in_array('-vn', $arguments, true)
+        && ! in_array('0:V:0?', $arguments, true));
+});
+
+it('needs a full copy when the video does not play', function () {
+    Media::fake(['old.avi' => FakeProbe::video(codec: 'mpeg4')]);
+
+    Media::fromDisk('local')->open('old.avi')->makePlayable('old-audio.m4a', audioOnly: true);
+})->throws(InvalidMediaException::class, "The video of old.avi doesn't play in browsers, so it needs a full playable copy.");
+
 it('needs a video stream for a ladder', function () {
     Media::fake(['song.m4a' => FakeProbe::audio()]);
 
