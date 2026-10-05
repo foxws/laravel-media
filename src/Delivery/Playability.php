@@ -56,9 +56,10 @@ final readonly class Playability
     /**
      * The output format that copies the streams that play and re-encodes the others: the video
      * with media.playback.video_codec, and each audio stream that doesn't play as AAC. Audio only
-     * leaves the video and subtitles out, for a file that gives a stream its audio tracks.
+     * leaves the video and subtitles out, for a file that gives a stream its audio tracks. The
+     * hardware defaults to hardware().
      */
-    public function format(bool $audioOnly = false): Format
+    public function format(bool $audioOnly = false, ?HardwareAcceleration $hardware = null): Format
     {
         $bitrate = (string) Config::integer('media.playback.audio_bitrate', 192).'k';
         $audio = array_merge(...array_map(fn (int $position): array => ["-c:a:{$position}", AudioCodec::Aac->value, "-b:a:{$position}", $bitrate], $this->audioNeedingEncoding()));
@@ -68,7 +69,7 @@ final readonly class Playability
         }
 
         $codec = $this->needsVideoEncoding() ? $this->videoCodec() : VideoCodec::Copy;
-        $hardware = $this->hardware();
+        $hardware ??= $this->hardware();
 
         if ($codec !== VideoCodec::Copy && $hardware !== HardwareAcceleration::None) {
             return new Format(

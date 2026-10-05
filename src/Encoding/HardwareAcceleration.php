@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Encoding;
 
+use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filters\Custom;
 use Foxws\Media\Filters\Filter;
 use Foxws\Media\Filters\Scale;
+use Foxws\Media\Process\Runner;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
+use Throwable;
 
 /**
  * Where a ladder decodes, scales and encodes: on the CPU, or on the GPU with VAAPI (Intel and AMD on
  * Linux), NVENC (NVIDIA) or Quick Sync (Intel). Frames stay on the GPU between those steps. Sources
- * the GPU may not decode, such as those made playable, are decoded on the CPU and uploaded.
+ * the GPU may not decode, such as those made playable, are decoded on the CPU and uploaded. VAAPI
+ * and Quick Sync open the render device in media.ladder.vaapi_device.
  */
 enum HardwareAcceleration: string
 {
@@ -31,15 +36,79 @@ enum HardwareAcceleration: string
     }
 
     /**
+     * The acceleration set in media.delivery.hardware for renditions encoded on request, or
+     * media.ladder.hardware when that's null.
+     */
+    public static function forDelivery(): self
+    {
+        $hardware = Config::get('media.delivery.hardware');
+
+        return is_string($hardware) && $hardware !== '' ? self::tryFrom($hardware) ?? self::None : self::configured();
+    }
+
+    /**
+     * The render device VAAPI and Quick Sync open: renderD128 for the first GPU, renderD129 for
+     * a second one, and so on.
+     */
+    public static function device(): string
+    {
+        return Config::string('media.ladder.vaapi_device', '/dev/dri/renderD128');
+    }
+
+    /**
+     * Whether ffmpeg can open the GPU, checked by opening its device once and remembered for five
+     * minutes in the media.delivery.cache_store. The CPU always is.
+     */
+    public function isAvailable(): bool
+    {
+        if ($this === self::None) {
+            return true;
+        }
+
+        return (bool) Cache::store(Config::get('media.delivery.cache_store'))->remember(
+            "media:hardware:{$this->value}:".hash('xxh128', self::device()),
+            300,
+            function (): bool {
+                try {
+                    app(Runner::class)->run(Executable::FFMpeg, [
+                        '-hide_banner',
+                        '-nostdin',
+                        '-loglevel', 'error',
+                        ...$this->deviceArguments(),
+                        '-f', 'lavfi',
+                        '-i', 'nullsrc=s=64x64',
+                        '-frames:v', '1',
+                        '-f', 'null',
+                        '-',
+                    ], timeout: 30);
+
+                    return true;
+                } catch (Throwable) {
+                    return false;
+                }
+            },
+        );
+    }
+
+    /**
+     * This acceleration when its GPU can be opened, otherwise the CPU, so a missing or inaccessible
+     * device only costs speed. The failed check is logged with ffmpeg's error.
+     */
+    public function orCpu(): self
+    {
+        return $this->isAvailable() ? $this : self::None;
+    }
+
+    /**
      * @return list<string>
      */
     public function inputArguments(): array
     {
         return match ($this) {
             self::None => [],
-            self::Vaapi => ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi', '-vaapi_device', Config::string('media.ladder.vaapi_device', '/dev/dri/renderD128')],
+            self::Vaapi => ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi', '-vaapi_device', self::device()],
             self::Nvenc => ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'],
-            self::Qsv => ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv'],
+            self::Qsv => [...$this->deviceArguments(), '-hwaccel', 'qsv', '-hwaccel_device', 'hw', '-hwaccel_output_format', 'qsv'],
         };
     }
 
@@ -52,8 +121,8 @@ enum HardwareAcceleration: string
     {
         return match ($this) {
             self::None, self::Nvenc => [],
-            self::Vaapi => ['-vaapi_device', Config::string('media.ladder.vaapi_device', '/dev/dri/renderD128')],
-            self::Qsv => ['-init_hw_device', 'qsv=hw', '-filter_hw_device', 'hw'],
+            self::Vaapi => ['-vaapi_device', self::device()],
+            self::Qsv => [...$this->deviceArguments(), '-filter_hw_device', 'hw'],
         };
     }
 
@@ -87,15 +156,31 @@ enum HardwareAcceleration: string
     }
 
     /**
-     * Scale to a size, with -2 for the side that follows the aspect ratio.
+     * The arguments that open the GPU as the device named "hw".
+     *
+     * @return list<string>
+     */
+    protected function deviceArguments(): array
+    {
+        return match ($this) {
+            self::None => [],
+            self::Vaapi => ['-init_hw_device', 'vaapi=hw:'.self::device()],
+            self::Nvenc => ['-init_hw_device', 'cuda=hw'],
+            self::Qsv => ['-init_hw_device', 'qsv=hw,child_device='.self::device()],
+        };
+    }
+
+    /**
+     * Scale to a size, with -2 for the side that follows the aspect ratio. GPU frames are scaled to
+     * 8-bit 4:2:0, which every hardware encoder takes, also from 10-bit sources.
      */
     public function scale(int $width, int $height): Filter
     {
         return match ($this) {
             self::None => Scale::to($width > 0 ? $width : null, $height > 0 ? $height : null),
-            self::Vaapi => Custom::video("scale_vaapi=w={$width}:h={$height}"),
-            self::Nvenc => Custom::video("scale_cuda={$width}:{$height}"),
-            self::Qsv => Custom::video("scale_qsv=w={$width}:h={$height}"),
+            self::Vaapi => Custom::video("scale_vaapi=w={$width}:h={$height}:format=nv12"),
+            self::Nvenc => Custom::video("scale_cuda={$width}:{$height}:format=yuv420p"),
+            self::Qsv => Custom::video("scale_qsv=w={$width}:h={$height}:format=nv12"),
         };
     }
 
