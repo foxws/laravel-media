@@ -6,6 +6,7 @@ namespace Foxws\Media\Delivery;
 
 use Foxws\Media\Encoding\AudioCodec;
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\PixelFormat;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Probe\AudioStream;
 use Foxws\Media\Probe\Probe;
@@ -19,10 +20,6 @@ use InvalidArgumentException;
  */
 final readonly class Playability
 {
-    protected const array EightBit = ['yuv420p', 'yuvj420p'];
-
-    protected const array TenBit = ['yuv420p10le', 'yuv420p10be'];
-
     public function __construct(
         public Probe $probe,
     ) {}
@@ -77,7 +74,7 @@ final readonly class Playability
             crf: $codec === VideoCodec::Copy ? null : $this->crf($codec),
             preset: $codec === VideoCodec::Copy ? null : $this->preset($codec),
             arguments: [
-                ...($codec === VideoCodec::H264 ? ['-pix_fmt', 'yuv420p'] : []),
+                ...($codec === VideoCodec::H264 ? ['-pix_fmt', PixelFormat::Yuv420p->value] : []),
                 ...($codec === VideoCodec::Hevc ? ['-tag:v', 'hvc1'] : []),
                 ...$audio,
                 '-c:s', 'copy',
@@ -95,7 +92,9 @@ final readonly class Playability
             return true;
         }
 
-        return in_array($video->pixelFormat, $video->codecName === 'h264' ? self::EightBit : [...self::EightBit, ...self::TenBit], true);
+        $pixelFormat = PixelFormat::tryFrom($video->pixelFormat);
+
+        return $pixelFormat !== null && ($video->codecName !== 'h264' || $pixelFormat->bitDepth() === 8);
     }
 
     protected function videoCodec(): VideoCodec

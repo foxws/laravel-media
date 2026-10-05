@@ -46,7 +46,7 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 
 | Key | Variable | Default | Purpose |
 | --- | --- | --- | --- |
-| `playback.video_codecs` | `MEDIA_PLAYBACK_VIDEO_CODECS` | `h264,hevc,av1,vp9` | Video codecs browsers play, by ffprobe name |
+| `playback.video_codecs` | `MEDIA_PLAYBACK_VIDEO_CODECS` | `hevc,h264,av1,vp9` | Video codecs browsers play, by ffprobe name |
 | `playback.audio_codecs` | `MEDIA_PLAYBACK_AUDIO_CODECS` | `aac,mp3,opus,flac` | Audio codecs browsers play |
 | `playback.video_codec` | `MEDIA_PLAYBACK_VIDEO_CODEC` | `libx264` | Encoder for video that doesn't play: `libx264`, `libx265` or `libsvtav1` |
 | `playback.crf` | `MEDIA_PLAYBACK_CRF` | the codec's (20, 24 or 30) | Quality of that encode |

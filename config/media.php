@@ -119,7 +119,7 @@ return [
     */
 
     'playback' => [
-        'video_codecs' => explode(',', (string) env('MEDIA_PLAYBACK_VIDEO_CODECS', 'h264,hevc,av1,vp9')),
+        'video_codecs' => explode(',', (string) env('MEDIA_PLAYBACK_VIDEO_CODECS', 'hevc,h264,av1,vp9')),
         'audio_codecs' => explode(',', (string) env('MEDIA_PLAYBACK_AUDIO_CODECS', 'aac,mp3,opus,flac')),
         'video_codec' => env('MEDIA_PLAYBACK_VIDEO_CODEC', 'libx264'),
         'crf' => env('MEDIA_PLAYBACK_CRF'),

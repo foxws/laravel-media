@@ -248,7 +248,7 @@ if (! $media->playability()->isPlayable()) {
 }
 @endboostsnippet
 
-- Playable codecs come from `media.playback.video_codecs` (`h264,hevc,av1,vp9`) and `.audio_codecs` (`aac,mp3,opus,flac`); H.264 must be 8-bit 4:2:0, the others 4:2:0 at 8 or 10 bits. Drop `hevc` when Firefox must play everything (its HEVC support is experimental, Nightly only).
+- Playable codecs come from `media.playback.video_codecs` (`hevc,h264,av1,vp9`) and `.audio_codecs` (`aac,mp3,opus,flac`); H.264 must be 8-bit 4:2:0, the others 4:2:0 at 8 or 10 bits. Drop `hevc` when Firefox must play everything (its HEVC support is experimental, Nightly only).
 - `makePlayable()` copies what plays and re-encodes only the rest: video with `media.playback.video_codec` (`libx264` by default, `libx265`, `libsvtav1`), each unplayable audio stream as AAC (`-c:a:N`). Audio-only repairs copy the video and are fast. MKV outputs keep subtitles; MP4/MOV outputs drop them.
 - `needsVideoEncoding()` and `audioNeedingEncoding()` (audio stream positions) tell what's wrong.
 - The source is never changed, so it can be kept untouched. When only the audio doesn't play, `makePlayable('movie-audio.m4a', audioOnly: true)` writes just the audio streams (playable ones copied, others as AAC); stream it next to the source with `open(['movie.mkv', 'movie-audio.m4a'])->stream()->tracksFrom([0], 1)`, video from variant 0 and audio tracks from variant 1. Audio only throws `InvalidMediaException` when the video doesn't play either.
