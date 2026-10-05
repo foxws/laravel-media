@@ -380,8 +380,13 @@ final class CommonEncryption
             return '';
         }
 
-        return openssl_encrypt($data, 'aes-128-ctr', $key, OPENSSL_RAW_DATA, str_pad($iv, 16, "\0"))
-            ?: throw new InvalidArgumentException('The sample could not be encrypted.');
+        $encrypted = openssl_encrypt($data, 'aes-128-ctr', $key, OPENSSL_RAW_DATA, str_pad($iv, 16, "\0"));
+
+        if ($encrypted === false) {
+            throw new InvalidArgumentException('The sample could not be encrypted.');
+        }
+
+        return $encrypted;
     }
 
     /**
