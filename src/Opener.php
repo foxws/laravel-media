@@ -184,6 +184,7 @@ class Opener
     {
         $probe = $this->probe();
         $source = $probe->videoStream() ?? throw InvalidMediaException::noVideo($this->mediaFor()->path());
+        $ladder = $ladder->hardware($ladder->acceleration()->orCpu());
 
         if ($ladder->alignToSource) {
             $start = (float) $probe->format()->get('start_time', 0);
@@ -216,7 +217,7 @@ class Opener
 
     /**
      * Copy the (first) opened file with every stream browsers can't play re-encoded, see
-     * playability(). Text subtitles are kept in containers other than MP4 and MOV, which can't
+     * playability(), on the CPU when media.playback.hardware's GPU can't be opened. Text subtitles are kept in containers other than MP4 and MOV, which can't
      * carry them as they are, so an MKV output keeps every stream. Audio only writes just the
      * audio streams, to stream next to the untouched file with tracksFrom(), when its video plays.
      *
@@ -232,7 +233,7 @@ class Opener
 
         $subtitles = ! $audioOnly && ! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['mp4', 'm4v', 'mov'], true);
         $maps = $audioOnly ? ['0:a'] : ['0:V:0?', '0:a?', ...($subtitles ? ['0:s?'] : [])];
-        $hardware = ! $audioOnly && $playability->needsVideoEncoding() ? $playability->hardware() : HardwareAcceleration::None;
+        $hardware = ! $audioOnly && $playability->needsVideoEncoding() ? $playability->hardware()->orCpu() : HardwareAcceleration::None;
         $upload = $hardware->upload();
 
         return $this->ffmpeg()
@@ -240,7 +241,7 @@ class Opener
             ->addOutput($path, fn (Output $output): Output => $output
                 ->map(...$maps)
                 ->addFilter(...($upload !== null ? [$upload] : []))
-                ->inFormat($playability->format($audioOnly)));
+                ->inFormat($playability->format($audioOnly, $hardware)));
     }
 
     /**

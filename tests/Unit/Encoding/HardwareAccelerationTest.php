@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\VideoCodec;
+use Foxws\Media\Executables\Executable;
+use Foxws\Media\Facades\Media;
 
 it('decodes on the gpu and keeps the frames there', function (HardwareAcceleration $hardware, array $arguments) {
     expect($hardware->inputArguments())->toBe($arguments);
@@ -11,7 +13,7 @@ it('decodes on the gpu and keeps the frames there', function (HardwareAccelerati
     'none' => [HardwareAcceleration::None, []],
     'vaapi' => [HardwareAcceleration::Vaapi, ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi', '-vaapi_device', '/dev/dri/renderD128']],
     'nvenc' => [HardwareAcceleration::Nvenc, ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']],
-    'qsv' => [HardwareAcceleration::Qsv, ['-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv']],
+    'qsv' => [HardwareAcceleration::Qsv, ['-init_hw_device', 'qsv=hw,child_device=/dev/dri/renderD128', '-hwaccel', 'qsv', '-hwaccel_device', 'hw', '-hwaccel_output_format', 'qsv']],
 ]);
 
 it('reads the vaapi device and the configured acceleration from the config', function () {
@@ -29,9 +31,9 @@ it('scales with the filter of each acceleration', function (HardwareAcceleration
     expect((string) $hardware->scale(-2, 720))->toBe($filter);
 })->with([
     'none' => [HardwareAcceleration::None, 'scale=-2:720'],
-    'vaapi' => [HardwareAcceleration::Vaapi, 'scale_vaapi=w=-2:h=720'],
-    'nvenc' => [HardwareAcceleration::Nvenc, 'scale_cuda=-2:720'],
-    'qsv' => [HardwareAcceleration::Qsv, 'scale_qsv=w=-2:h=720'],
+    'vaapi' => [HardwareAcceleration::Vaapi, 'scale_vaapi=w=-2:h=720:format=nv12'],
+    'nvenc' => [HardwareAcceleration::Nvenc, 'scale_cuda=-2:720:format=yuv420p'],
+    'qsv' => [HardwareAcceleration::Qsv, 'scale_qsv=w=-2:h=720:format=nv12'],
 ]);
 
 it('names the encoder of each codec', function () {
@@ -49,7 +51,7 @@ it('uploads frames decoded on the cpu to the gpu', function (HardwareAcceleratio
     'none' => [HardwareAcceleration::None, [], null],
     'vaapi' => [HardwareAcceleration::Vaapi, ['-vaapi_device', '/dev/dri/renderD128'], 'format=nv12,hwupload'],
     'nvenc' => [HardwareAcceleration::Nvenc, [], null],
-    'qsv' => [HardwareAcceleration::Qsv, ['-init_hw_device', 'qsv=hw', '-filter_hw_device', 'hw'], 'format=nv12,hwupload=extra_hw_frames=64'],
+    'qsv' => [HardwareAcceleration::Qsv, ['-init_hw_device', 'qsv=hw,child_device=/dev/dri/renderD128', '-filter_hw_device', 'hw'], 'format=nv12,hwupload=extra_hw_frames=64'],
 ]);
 
 it('sets constant quality in the terms of each encoder', function (HardwareAcceleration $hardware, array $arguments) {
@@ -60,3 +62,53 @@ it('sets constant quality in the terms of each encoder', function (HardwareAccel
     'nvenc' => [HardwareAcceleration::Nvenc, ['-rc', 'vbr', '-cq', '22', '-b:v', '0']],
     'qsv' => [HardwareAcceleration::Qsv, ['-global_quality', '22']],
 ]);
+
+it('opens the configured render device, for a second gpu too', function () {
+    config(['media.ladder.vaapi_device' => '/dev/dri/renderD129']);
+
+    expect(HardwareAcceleration::device())->toBe('/dev/dri/renderD129')
+        ->and(HardwareAcceleration::Vaapi->uploadArguments())->toBe(['-vaapi_device', '/dev/dri/renderD129'])
+        ->and(HardwareAcceleration::Qsv->uploadArguments())->toContain('qsv=hw,child_device=/dev/dri/renderD129');
+});
+
+it('encodes renditions on request with the delivery hardware, or the ladder hardware', function () {
+    config(['media.ladder.hardware' => 'vaapi', 'media.delivery.hardware' => null]);
+
+    expect(HardwareAcceleration::forDelivery())->toBe(HardwareAcceleration::Vaapi);
+
+    config(['media.delivery.hardware' => 'nvenc']);
+
+    expect(HardwareAcceleration::forDelivery())->toBe(HardwareAcceleration::Nvenc);
+
+    config(['media.delivery.hardware' => 'unknown']);
+
+    expect(HardwareAcceleration::forDelivery())->toBe(HardwareAcceleration::None);
+});
+
+it('uses a gpu whose device opens, and remembers the check', function () {
+    Media::fake();
+
+    expect(HardwareAcceleration::Vaapi->orCpu())->toBe(HardwareAcceleration::Vaapi)
+        ->and(HardwareAcceleration::Vaapi->isAvailable())->toBeTrue();
+
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('vaapi=hw:/dev/dri/renderD128', $arguments, true));
+});
+
+it('falls back to the cpu when the gpu cannot be opened', function (HardwareAcceleration $hardware, string $device) {
+    Media::fake()->failNext(Executable::FFMpeg, 'No VA display found for device /dev/dri/renderD128.');
+
+    expect($hardware->orCpu())->toBe(HardwareAcceleration::None);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array($device, $arguments, true));
+})->with([
+    'vaapi' => [HardwareAcceleration::Vaapi, 'vaapi=hw:/dev/dri/renderD128'],
+    'nvenc' => [HardwareAcceleration::Nvenc, 'cuda=hw'],
+    'qsv' => [HardwareAcceleration::Qsv, 'qsv=hw,child_device=/dev/dri/renderD128'],
+]);
+
+it('needs no check for the cpu', function () {
+    Media::fake();
+
+    expect(HardwareAcceleration::None->orCpu())->toBe(HardwareAcceleration::None);
+    Media::assertNothingRan();
+});

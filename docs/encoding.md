@@ -131,7 +131,7 @@ Media::fromDisk('videos')->open(['movie.mp4', 'renditions/720p.mp4', 'renditions
 
   Stream them with the same segment duration the ladder used. `->keyframesAt([0, 6.2, 12.4])` places keyframes at times of your own.
 - **Codecs:** H.264 (the default), HEVC or AV1, with AAC audio in MP4.
-- **GPU encoding:** set `MEDIA_LADDER_HARDWARE` to `vaapi`, `nvenc` or `qsv`, or call `hardware()`, to decode, scale and encode on the GPU. VAAPI uses `MEDIA_LADDER_VAAPI_DEVICE` (`/dev/dri/renderD128`).
+- **GPU encoding:** set `MEDIA_LADDER_HARDWARE` to `vaapi`, `nvenc` or `qsv`, or call `hardware()`, to decode, scale and encode on the GPU. VAAPI and Quick Sync open `MEDIA_LADDER_VAAPI_DEVICE`: `/dev/dri/renderD128` for the first GPU, `renderD129` for a second one. When the GPU can't be opened (no device in the container, or no access to it), the ladder is encoded on the CPU instead; the failed check is logged and remembered for five minutes. GPU frames are scaled to 8-bit 4:2:0, so 10-bit sources work with every hardware encoder.
 
 The result can be [streamed](streaming.md) straight away or [packaged](packaging.md).
 

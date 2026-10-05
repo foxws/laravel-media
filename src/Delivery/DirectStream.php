@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media\Delivery;
 
 use Closure;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Encoding\Rendition;
 use Foxws\Media\Encoding\VideoCodec;
@@ -165,7 +166,9 @@ class DirectStream
 
     /**
      * Offer smaller H.264 variants of the source video, the ladder's renditions below its size,
-     * encoded one segment at a time when first requested and then cached like the others. They
+     * encoded one segment at a time when first requested and then cached like the others. They're
+     * encoded with the ladder's hardware, or media.delivery.hardware, on the CPU when its GPU can't
+     * be opened. They
      * line up with the source's segments, so players switch between them, and the source stays
      * the top variant. Fragmented streams only; trick play stays on the source.
      *
@@ -204,9 +207,11 @@ class DirectStream
         $sides = array_filter([$source->width, $source->height], fn (?int $side): bool => $side !== null && $side > 0);
         $shortSide = $sides !== [] ? min($sides) : 0;
 
+        $ladder = $this->renditionLadder->hardware(($this->renditionLadder->hardware ?? HardwareAcceleration::forDelivery())->orCpu());
+
         return $this->encodedRenditions = array_values(array_map(
-            fn (Rendition $rendition): EncodedRendition => new EncodedRendition($this->renditionLadder, $rendition, $source),
-            array_filter($this->renditionLadder->for($source), fn (Rendition $rendition): bool => $rendition->height < $shortSide),
+            fn (Rendition $rendition): EncodedRendition => new EncodedRendition($ladder, $rendition, $source),
+            array_filter($ladder->for($source), fn (Rendition $rendition): bool => $rendition->height < $shortSide),
         ));
     }
 

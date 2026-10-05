@@ -24,7 +24,7 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | Key | Variable | Default | Purpose |
 | --- | --- | --- | --- |
 | `ladder.hardware` | `MEDIA_LADDER_HARDWARE` | `none` | `none`, `vaapi`, `nvenc` or `qsv` |
-| `ladder.vaapi_device` | `MEDIA_LADDER_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device for VAAPI |
+| `ladder.vaapi_device` | `MEDIA_LADDER_VAAPI_DEVICE` | `/dev/dri/renderD128` | The render device for VAAPI and Quick Sync; `renderD129` for a second GPU |
 
 ## Streaming
 
@@ -41,6 +41,7 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | `delivery.look_ahead_via` | `MEDIA_DELIVERY_LOOK_AHEAD_VIA` | `queue` | `queue`, `defer` (after the response) or `null` (off) |
 | `delivery.look_ahead_connection` | `MEDIA_DELIVERY_LOOK_AHEAD_CONNECTION` | the default connection | Queue connection of the look-ahead job |
 | `delivery.look_ahead_queue` | `MEDIA_DELIVERY_LOOK_AHEAD_QUEUE` | the default queue | Queue of the look-ahead job |
+| `delivery.hardware` | `MEDIA_DELIVERY_HARDWARE` | `ladder.hardware` | Where renditions encoded on request are encoded: `none`, `vaapi`, `nvenc` or `qsv` |
 
 ## Playback
 

@@ -113,10 +113,10 @@ it('encodes a ladder in one ffmpeg run with an output per rendition that fits', 
         ->save();
 
     expect($result->paths())->toBe(['videos/1/720p-2800.mp4', 'videos/1/480p-1400.mp4', 'videos/1/360p-800.mp4']);
-    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRanTimes(Executable::FFMpeg, 2);
     Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 5, 7) === ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi', '-vaapi_device', '/dev/dri/renderD128', '-i']
         && count(array_keys($arguments, '-map', true)) === 6
-        && in_array('scale_vaapi=w=-2:h=480', $arguments, true)
+        && in_array('scale_vaapi=w=-2:h=480:format=nv12', $arguments, true)
         && in_array('h264_vaapi', $arguments, true));
 });
 
@@ -167,7 +167,7 @@ it('makes video playable on the gpu, decoding it on the cpu', function () {
     Media::fromDisk('videos')->open('old.avi')->makePlayable('old.mkv')->save();
     Media::fromDisk('videos')->open('movie.mkv')->makePlayable('movie.mkv')->save();
 
-    [$repaired, $copied] = Media::commands(Executable::FFMpeg);
+    [, $repaired, $copied] = Media::commands(Executable::FFMpeg);
 
     expect($repaired)->toContain('-vaapi_device', 'format=nv12,hwupload', 'h264_vaapi')
         ->not->toContain('-hwaccel')
@@ -191,6 +191,16 @@ it('needs a full copy when the video does not play', function () {
 
     Media::fromDisk('local')->open('old.avi')->makePlayable('old-audio.m4a', audioOnly: true);
 })->throws(InvalidMediaException::class, "The video of old.avi doesn't play in browsers, so it needs a full playable copy.");
+
+it('encodes a ladder on the cpu when its gpu cannot be opened', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(width: 1280, height: 720)])->failNext(Executable::FFMpeg, 'No VA display found');
+    Storage::fake('renditions');
+
+    Media::fromDisk('renditions')->open('video.mp4')->ladder(Ladder::standard()->hardware(HardwareAcceleration::Vaapi))->toDisk('renditions')->save();
+
+    expect(Media::commands(Executable::FFMpeg)[1])->toContain('libx264', 'scale=-2:480')
+        ->not->toContain('-hwaccel', 'h264_vaapi');
+});
 
 it('needs a video stream for a ladder', function () {
     Media::fake(['song.m4a' => FakeProbe::audio()]);

@@ -10,6 +10,7 @@ use Foxws\Media\Delivery\PackageSegments;
 use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Delivery\Subtitle;
 use Foxws\Media\Delivery\Track;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Encoding\Rendition;
 use Foxws\Media\Encoding\VideoCodec;
@@ -1150,4 +1151,20 @@ it('queues the next segments of a rendition with its ladder', function () {
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [1]
         && $job->renditions === $ladder
         && $job->variant === 2);
+});
+
+it('encodes renditions on request with the delivery hardware, on the cpu when its gpu cannot be opened', function () {
+    config(['media.delivery.hardware' => 'vaapi']);
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(new Ladder([new Rendition(720, 2800)]));
+
+    expect($stream->renditions()[0]->ladder->hardware)->toBe(HardwareAcceleration::Vaapi);
+
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)])->failNext(Executable::FFMpeg, 'No VA display found');
+    cache()->flush();
+
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(new Ladder([new Rendition(720, 2800)]));
+
+    expect($stream->renditions()[0]->ladder->hardware)->toBe(HardwareAcceleration::None);
 });
