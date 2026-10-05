@@ -1,3 +1,8 @@
+---
+section: Usage
+order: 3
+---
+
 # Streaming
 
 `stream()` serves stored files as HLS and DASH without packaging them first, like nginx-vod-module. Playlists come from the [keyframe index](probing.md#keyframes), and each segment is copied out of the file with `ffmpeg -c copy` the first time a player requests it, then kept on a cache disk. Each video is stored once, as an ordinary MP4 or MKV.

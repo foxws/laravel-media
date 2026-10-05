@@ -1,3 +1,8 @@
+---
+section: Usage
+order: 6
+---
+
 # Testing
 
 `Media::fake()` runs nothing, so tests don't need ffmpeg. Probes return fake data, ffmpeg writes placeholder files to the target disk, and every command is recorded. Events, progress and failures behave as they do in production.

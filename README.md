@@ -16,7 +16,7 @@ Probe, encode, package and stream audio and video in Laravel with ffprobe and ff
 
 It builds ffmpeg commands directly, without php-ffmpeg underneath, so any ffmpeg option is available without waiting on a package release.
 
-See the [full documentation](docs): [Installation](docs/installation.md), [Opening and probing](docs/probing.md), [Encoding](docs/encoding.md), [Streaming](docs/streaming.md), [Packaging](docs/packaging.md), [Queues, progress and errors](docs/queues.md), [Testing](docs/testing.md), [Configuration](docs/configuration.md), [Extending](docs/extending.md).
+See the [full documentation](docs/index.md): [Installation](docs/installation.md), [Opening and probing](docs/probing.md), [Encoding](docs/encoding.md), [Streaming](docs/streaming.md), [Packaging](docs/packaging.md), [Queues, progress and errors](docs/queues.md), [Testing](docs/testing.md), [Configuration](docs/configuration.md), [Extending](docs/extending.md).
 
 ## Requirements
 

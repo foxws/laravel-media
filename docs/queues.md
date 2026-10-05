@@ -1,3 +1,8 @@
+---
+section: Usage
+order: 5
+---
+
 # Queues, progress and errors
 
 Encoding takes long, so run it in queued jobs. This page covers what those jobs need.

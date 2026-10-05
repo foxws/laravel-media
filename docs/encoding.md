@@ -1,3 +1,8 @@
+---
+section: Usage
+order: 2
+---
+
 # Encoding
 
 `ffmpeg()` returns a builder for one ffmpeg run. `save()` writes the output to a temporary directory, then copies it to the target disk.

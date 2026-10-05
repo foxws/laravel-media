@@ -1,3 +1,8 @@
+---
+section: Usage
+order: 4
+---
+
 # Packaging
 
 Packaging writes HLS and DASH to a disk ahead of time: segments, playlists and manifests that any web server or CDN can serve. It doesn't re-encode, so [encode](encoding.md#rendition-ladders) the renditions first.

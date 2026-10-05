@@ -1,3 +1,8 @@
+---
+section: Getting Started
+order: 1
+---
+
 # Installation
 
 ## Requirements

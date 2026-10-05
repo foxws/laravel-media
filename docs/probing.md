@@ -1,3 +1,8 @@
+---
+section: Usage
+order: 1
+---
+
 # Opening and probing
 
 ## Opening files

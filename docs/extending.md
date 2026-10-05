@@ -1,3 +1,8 @@
+---
+section: Advanced
+order: 1
+---
+
 # Extending
 
 ## Macros

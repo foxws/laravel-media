@@ -1,3 +1,8 @@
+---
+section: Reference
+order: 1
+---
+
 # Configuration
 
 Publish the config file with `php artisan vendor:publish --tag="media-config"`. Every key has an environment variable, so most apps only set those.
