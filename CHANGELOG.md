@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.1 - 2026-10-05
+
+<!-- Release notes generated using configuration in .github/release.yml at 0319eca463f61e27745fc62d2e1b85424ebcbae7 -->
+### What's Changed
+
+#### Other Changes
+
+* Fall back to the CPU when the GPU can't be opened by @francoism90 in https://github.com/foxws/laravel-media/pull/50
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.0...0.3.1
+
 ## 0.3.0 - 2026-10-05
 
 <!-- Release notes generated using configuration in .github/release.yml at 897e49f5b08b53d0ee5915c02681afb98a0151b3 -->
