@@ -233,7 +233,7 @@ The same `withEncryption()` stream also serves CMAF and DASH, encrypted with Com
 - **CSRF:** players POST license requests, so register the streams where CSRF protection doesn't apply (e.g. `routes/api.php`) or exclude `*/license.json` from it.
 - **Fragments:** audio samples are encrypted whole. H.264 and HEVC samples are encrypted per NAL unit, so lengths, NAL headers and parameter sets stay readable. Initialization segments get `encv`/`enca` sample entries with the scheme and key ID, plus a Common PSSH box. Each sample gets its own 8-byte IV, derived from the variant, track, segment and sample number.
 - **Codecs:** AV1 and VP9 can't be encrypted yet (their frame headers would have to be parsed), so encrypted CMAF and DASH output of them throws `InvalidMediaException`.
-- **Players:** browsers support ClearKey through EME (Chrome, Edge and Firefox). Safari doesn't, so give it `hlsUrl()`. ClearKey hands the key to the browser, so it protects segments at rest and in transit, not from viewers; use `exportAsDASH()` with a DRM system for real content protection.
+- **Players:** browsers support ClearKey through EME (Chrome, Edge and Firefox). Safari doesn't, so give it `hlsUrl()`. ClearKey hands the key to the browser, so it protects segments at rest and in transit, not from viewers.
 - `EncryptionKey::keyIdUuid()` formats the key ID as a UUID, and `toJsonWebKey()` as ClearKey's JSON Web Key.
 
 ## Scenes, clips and reels
@@ -600,7 +600,7 @@ Opener::macro('encoder', fn () => new EncoderBuilder($this));             // $op
 
 - `Runner::run($binary, $arguments, environment: ['SVT_LOG' => '1'])` runs it with progress, cancelling, events, logging and redacted keys, like ffmpeg.
 - `Opener` and `MediaFactory` take macros, and the `Media` facade forwards `MediaFactory` macros.
-- In tests, `Media::fake()->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => '...')` fakes its output, and the usual assertions accept any `Binary`.
+- In tests, `$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => '...')` fakes its output, and the usual assertions accept any `Binary`.
 
 ## Configuration
 
@@ -613,6 +613,8 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `executables.ffmpeg`, `.ffprobe` | Path or command name (`MEDIA_FFMPEG_PATH`, …) |
 | `delivery.segment_duration`, `.cache_store`, `.index_lifetime` | Segment length and keyframe index caching for streaming from stored files |
 | `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served (`media:prune` trims the cache) |
+| `delivery.look_ahead`, `.look_ahead_via`, `.look_ahead_connection`, `.look_ahead_queue` | Segments packaged ahead of the player, and where (`queue`, `defer` or `null`) |
+| `ladder.hardware`, `.vaapi_device` | GPU encoding for `ladder()` (`MEDIA_LADDER_HARDWARE`: `none`, `vaapi`, `nvenc`, `qsv`) |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |
@@ -693,8 +695,8 @@ Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('libx264'
 Media::assertNotRan(Executable::FFMpeg, fn (array $arguments) => in_array('-pass', $arguments, true));
 @endboostsnippet
 
-- Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
-- `Media::fake()->failNext(Executable::FFMpeg, 'Invalid data found')` makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
-- `Media::fake()->respondUsing($binary, fn (array $arguments) => $output)` fakes the output of an add-on's executable; without it, add-on executables run as successful with no output.
+- Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `subtitles`, `audioLanguages`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
+- `$fake->failNext(Executable::FFMpeg, 'Invalid data found')` (on the fake `Media::fake()` returned; calling it again starts a new fake) makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
+- `$fake->respondUsing($binary, fn (array $arguments) => $output)` fakes the output of an add-on's executable; without it, add-on executables run as successful with no output.
 - `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
 - Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.
