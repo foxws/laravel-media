@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.0 - 2026-10-05
+
+<!-- Release notes generated using configuration in .github/release.yml at 897e49f5b08b53d0ee5915c02681afb98a0151b3 -->
+### What's Changed
+
+#### Other Changes
+
+* Encode renditions of direct streams on request by @francoism90 in https://github.com/foxws/laravel-media/pull/49
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.2.0...0.3.0
+
 ## 0.2.0 - 2026-10-05
 
 <!-- Release notes generated using configuration in .github/release.yml at 3672f8b8cb61cdafa8e4ca784774e99646a74261 -->
