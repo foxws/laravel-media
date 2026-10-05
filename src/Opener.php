@@ -9,6 +9,7 @@ use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Delivery\KeyframeIndexer;
 use Foxws\Media\Delivery\Playability;
 use Foxws\Media\Delivery\Segment;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
@@ -231,10 +232,15 @@ class Opener
 
         $subtitles = ! $audioOnly && ! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['mp4', 'm4v', 'mov'], true);
         $maps = $audioOnly ? ['0:a'] : ['0:V:0?', '0:a?', ...($subtitles ? ['0:s?'] : [])];
+        $hardware = ! $audioOnly && $playability->needsVideoEncoding() ? $playability->hardware() : HardwareAcceleration::None;
+        $upload = $hardware->upload();
 
-        return $this->ffmpeg()->addOutput($path, fn (Output $output): Output => $output
-            ->map(...$maps)
-            ->inFormat($playability->format($audioOnly)));
+        return $this->ffmpeg()
+            ->addInputArgs($hardware->uploadArguments())
+            ->addOutput($path, fn (Output $output): Output => $output
+                ->map(...$maps)
+                ->addFilter(...($upload !== null ? [$upload] : []))
+                ->inFormat($playability->format($audioOnly)));
     }
 
     /**

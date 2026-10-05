@@ -159,6 +159,21 @@ it('makes a file playable, keeping subtitles in containers that carry them', fun
         ->and($mp4)->not->toContain('0:s?');
 });
 
+it('makes video playable on the gpu, decoding it on the cpu', function () {
+    config(['media.playback.hardware' => 'vaapi']);
+    Media::fake(['old.avi' => FakeProbe::video(codec: 'mpeg4'), 'movie.mkv' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('old.avi')->makePlayable('old.mkv')->save();
+    Media::fromDisk('videos')->open('movie.mkv')->makePlayable('movie.mkv')->save();
+
+    [$repaired, $copied] = Media::commands(Executable::FFMpeg);
+
+    expect($repaired)->toContain('-vaapi_device', 'format=nv12,hwupload', 'h264_vaapi')
+        ->not->toContain('-hwaccel')
+        ->and($copied)->not->toContain('-vaapi_device', 'format=nv12,hwupload');
+});
+
 it('makes only the audio playable, to stream next to the untouched video', function () {
     Media::fake(['movie.mkv' => FakeProbe::video(audioLanguages: ['eng', 'jpn'])]);
     Storage::fake('videos');

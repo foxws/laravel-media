@@ -6,6 +6,7 @@ namespace Foxws\Media\Delivery;
 
 use Foxws\Media\Encoding\AudioCodec;
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\PixelFormat;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Probe\AudioStream;
@@ -67,6 +68,22 @@ final readonly class Playability
         }
 
         $codec = $this->needsVideoEncoding() ? $this->videoCodec() : VideoCodec::Copy;
+        $hardware = $this->hardware();
+
+        if ($codec !== VideoCodec::Copy && $hardware !== HardwareAcceleration::None) {
+            return new Format(
+                audioCodec: AudioCodec::Copy,
+                preset: $hardware === HardwareAcceleration::Vaapi ? null : $this->hardwarePreset(),
+                arguments: [
+                    '-c:v', $hardware->encoder($codec),
+                    ...$hardware->quality($this->crf($codec)),
+                    ...($hardware === HardwareAcceleration::Nvenc ? ['-pix_fmt', PixelFormat::Yuv420p->value] : []),
+                    ...($codec === VideoCodec::Hevc ? ['-tag:v', 'hvc1'] : []),
+                    ...$audio,
+                    '-c:s', 'copy',
+                ],
+            );
+        }
 
         return new Format(
             videoCodec: $codec,
@@ -80,6 +97,17 @@ final readonly class Playability
                 '-c:s', 'copy',
             ],
         );
+    }
+
+    /**
+     * Where video that doesn't play is encoded: media.playback.hardware, or the CPU when that's null
+     * or "none". The video is decoded on the CPU either way, as GPUs may not decode such sources.
+     */
+    public function hardware(): HardwareAcceleration
+    {
+        $hardware = Config::get('media.playback.hardware');
+
+        return is_string($hardware) ? HardwareAcceleration::tryFrom($hardware) ?? HardwareAcceleration::None : HardwareAcceleration::None;
     }
 
     protected function playsVideo(VideoStream $video): bool
@@ -121,6 +149,13 @@ final readonly class Playability
             VideoCodec::Av1 => 30,
             default => 20,
         };
+    }
+
+    protected function hardwarePreset(): string
+    {
+        $preset = Config::get('media.playback.preset');
+
+        return is_string($preset) && $preset !== '' ? $preset : 'medium';
     }
 
     protected function preset(VideoCodec $codec): string|int

@@ -41,3 +41,22 @@ it('names the encoder of each codec', function () {
         ->and(HardwareAcceleration::Qsv->encoder(VideoCodec::H264))->toBe('h264_qsv')
         ->and(fn () => HardwareAcceleration::Vaapi->encoder(VideoCodec::Vp9))->toThrow(InvalidArgumentException::class, '[libvpx-vp9] has no vaapi encoder');
 });
+
+it('uploads frames decoded on the cpu to the gpu', function (HardwareAcceleration $hardware, array $arguments, ?string $filter) {
+    expect($hardware->uploadArguments())->toBe($arguments)
+        ->and($hardware->upload() !== null ? (string) $hardware->upload() : null)->toBe($filter);
+})->with([
+    'none' => [HardwareAcceleration::None, [], null],
+    'vaapi' => [HardwareAcceleration::Vaapi, ['-vaapi_device', '/dev/dri/renderD128'], 'format=nv12,hwupload'],
+    'nvenc' => [HardwareAcceleration::Nvenc, [], null],
+    'qsv' => [HardwareAcceleration::Qsv, ['-init_hw_device', 'qsv=hw', '-filter_hw_device', 'hw'], 'format=nv12,hwupload=extra_hw_frames=64'],
+]);
+
+it('sets constant quality in the terms of each encoder', function (HardwareAcceleration $hardware, array $arguments) {
+    expect($hardware->quality(22))->toBe($arguments);
+})->with([
+    'none' => [HardwareAcceleration::None, ['-crf', '22']],
+    'vaapi' => [HardwareAcceleration::Vaapi, ['-rc_mode', 'CQP', '-qp', '22']],
+    'nvenc' => [HardwareAcceleration::Nvenc, ['-rc', 'vbr', '-cq', '22', '-b:v', '0']],
+    'qsv' => [HardwareAcceleration::Qsv, ['-global_quality', '22']],
+]);
