@@ -43,5 +43,15 @@ it('is unique per file, segments, track, duration and cache disk', function () {
     expect($job->uniqueId())->toBe(new PackageSegments('videos', 'video.mp4', [1, 2], Track::Video, 6.0, 'segments')->uniqueId())
         ->not->toBe(new PackageSegments('videos', 'video.mp4', [2, 3], Track::Video, 6.0, 'segments')->uniqueId())
         ->not->toBe(new PackageSegments('videos', 'video.mp4', [1, 2], Track::Audio, 6.0, 'segments')->uniqueId())
-        ->not->toBe(new PackageSegments('videos', 'video.mp4', [1, 2], null, 6.0, 'segments')->uniqueId());
+        ->not->toBe(new PackageSegments('videos', 'video.mp4', [1, 2], null, 6.0, 'segments')->uniqueId())
+        ->not->toBe(new PackageSegments('videos', 'video.mp4', [1, 2], Track::Audio, 6.0, 'segments', 1)->uniqueId());
+});
+
+it('packages the segments of a later audio stream', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13, audioLanguages: ['eng', 'jpn'])]);
+
+    new PackageSegments('videos', 'video.mp4', [1], Track::Audio, 6.0, 'segments', 1)->handle(app(MediaFactory::class));
+
+    expect(Storage::disk('segments')->allFiles())->toContain(Media::fromDisk('videos')->open('video.mp4')->stream()->toCache('segments')->segment(0, 1, Track::Audio, 1));
+    Media::assertRanTimes(Executable::FFMpeg, 1);
 });

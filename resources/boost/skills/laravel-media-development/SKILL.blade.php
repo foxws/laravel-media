@@ -104,7 +104,7 @@ MediaStream::chaptersUrl('videos', ['video' => $video]);   // the chapters as We
 @endboostsnippet
 
 - **Resolvers:** parameters typed as a model (any `UrlRoutable`) are bound like implicit route model binding (404 when missing); other parameters are injected by the container. Return an `Opener` or a configured `DirectStream`. Authorize inside the resolver or with route middleware.
-- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.license`, `.track-playlist`, `.init`, `.fragment` and `.chapters`, and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
+- **Routes:** `Route::mediaStream($uri, $name)` names its routes `media.{name}.cmaf`, `.hls`, `.dash`, `.playlist`, `.segment`, `.key`, `.license`, `.track-playlist`, `.init`, `.fragment` and `.chapters` (tracks are `video`, `audio`, `audio-{n}` and `iframes`), and works inside `Route::name()`/`prefix()` groups. Playlists link to each other with absolute URLs, and are sent with `private, no-cache`.
 - **Signed streams:** `signed($lifetime)` rejects requests without a valid signature (403) and signs every playlist, segment and key URL for `$lifetime` seconds (default `media.delivery.url_lifetime`).
 
 For full control, call the stream yourself from your own routes:
@@ -142,6 +142,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 ### Fragmented MP4 and DASH
 
 - **Tracks:** fragmented segments hold one track (`Track::Video` or `Track::Audio`), as CMAF and DASH expect. Every file with video is a video representation, and the audio of the first file with audio is shared by all of them (HLS `#EXT-X-MEDIA` audio rendition, DASH audio adaptation set).
+- **Audio languages:** every audio stream of that file is an audio track players pick by language (Shaka Player's `preferredAudioLanguage`): one `#EXT-X-MEDIA` per stream with `NAME` (the stream's title, language or number) and `LANGUAGE`, and one DASH adaptation set per stream with `lang`, `<Label>` and a `main`/`alternate` role. The stream marked as default (or the first) is `DEFAULT=YES`. The first stream is the track `audio`, the others `audio-1`, `audio-2` and so on (`Track::Audio->name($position)`, mapped as `0:a:{position}`), each with its own segments. Streams fragmented MP4 can't carry, like TrueHD or DTS, are left out. `->withAudioStreams(['eng', 'jpn'])` (languages or positions, e.g. `[0]`) limits them. MPEG-TS segments (`hlsUrl()`) carry the first audio stream only. In tests, `FakeProbe::video(audioLanguages: ['eng', 'jpn'])` fakes a file with several.
 - **HLS:** CMAF playlists are version 7 with `#EXT-X-MAP` initialization segments. Without routes, `fragmented()` switches `masterPlaylist()` and `mediaPlaylist()` from MPEG-TS to fragmented MP4.
 - **Players:** Shaka Player, hls.js, dash.js and Safari play fragmented MP4 natively, without mux.js.
 - **Codecs:** fragmented MP4 also carries AV1, VP9, Opus and FLAC. HEVC is tagged `hvc1` for Safari. AV1 gets its `av01` codec string from the probed profile, level and pixel format; VP9 has none, so players probe it themselves.
