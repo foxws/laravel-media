@@ -2,6 +2,19 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.2.0 - 2026-10-05
+
+<!-- Release notes generated using configuration in .github/release.yml at 3672f8b8cb61cdafa8e4ca784774e99646a74261 -->
+### What's Changed
+
+#### Other Changes
+
+* Align ladder keyframes to the source by @francoism90 in https://github.com/foxws/laravel-media/pull/46
+* Check and repair what browsers can play by @francoism90 in https://github.com/foxws/laravel-media/pull/47
+* Make video playable on the GPU by @francoism90 in https://github.com/foxws/laravel-media/pull/48
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.1.2...0.2.0
+
 ## 0.1.2 - 2026-10-05
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
