@@ -58,4 +58,9 @@ class InvalidMediaException extends RuntimeException
     {
         return new self("{$path} has no video stream.");
     }
+
+    public static function videoNotPlayable(string $path): self
+    {
+        return new self("The video of {$path} doesn't play in browsers, so it needs a full playable copy.");
+    }
 }

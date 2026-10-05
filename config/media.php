@@ -106,6 +106,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Playback
+    |--------------------------------------------------------------------------
+    |
+    | The codecs browsers play through a direct stream, by their ffprobe name.
+    | H.264 also has to be 8-bit 4:2:0, and the others 4:2:0 at 8 or 10 bits.
+    | Remove "hevc" for Firefox, which only decodes it experimentally. Streams
+    | that don't play are re-encoded by $opener->makePlayable(): video with
+    | video_codec ("libx264", "libx265" or "libsvtav1") at the crf and preset
+    | (the codec's defaults when null), audio as AAC at audio_bitrate kbit/s.
+    |
+    */
+
+    'playback' => [
+        'video_codecs' => explode(',', (string) env('MEDIA_PLAYBACK_VIDEO_CODECS', 'hevc,h264,av1,vp9')),
+        'audio_codecs' => explode(',', (string) env('MEDIA_PLAYBACK_AUDIO_CODECS', 'aac,mp3,opus,flac')),
+        'video_codec' => env('MEDIA_PLAYBACK_VIDEO_CODEC', 'libx264'),
+        'crf' => env('MEDIA_PLAYBACK_CRF'),
+        'preset' => env('MEDIA_PLAYBACK_PRESET'),
+        'audio_bitrate' => (int) env('MEDIA_PLAYBACK_AUDIO_BITRATE', 192),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Timeout
     |--------------------------------------------------------------------------
     |

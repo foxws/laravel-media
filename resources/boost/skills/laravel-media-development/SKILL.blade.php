@@ -236,6 +236,23 @@ The same `withEncryption()` stream also serves CMAF and DASH, encrypted with Com
 - **Players:** browsers support ClearKey through EME (Chrome, Edge and Firefox). Safari doesn't, so give it `hlsUrl()`. ClearKey hands the key to the browser, so it protects segments at rest and in transit, not from viewers.
 - `EncryptionKey::keyIdUuid()` formats the key ID as a UUID, and `toJsonWebKey()` as ClearKey's JSON Web Key.
 
+### Playable files
+
+Direct streams copy streams as they are, so browsers must decode the source codecs. Check and repair at import, in a queued job:
+
+@boostsnippet("Making a file playable", "php")
+$media = Media::fromDisk('videos')->open('movie.mkv');
+
+if (! $media->playability()->isPlayable()) {
+    $media->makePlayable('movie-playable.mkv')->toDisk('videos')->save();   // then replace the source with it
+}
+@endboostsnippet
+
+- Playable codecs come from `media.playback.video_codecs` (`hevc,h264,av1,vp9`) and `.audio_codecs` (`aac,mp3,opus,flac`); H.264 must be 8-bit 4:2:0, the others 4:2:0 at 8 or 10 bits. Drop `hevc` when Firefox must play everything (its HEVC support is experimental, Nightly only).
+- `makePlayable()` copies what plays and re-encodes only the rest: video with `media.playback.video_codec` (`libx264` by default, `libx265`, `libsvtav1`), each unplayable audio stream as AAC (`-c:a:N`). Audio-only repairs copy the video and are fast. MKV outputs keep subtitles; MP4/MOV outputs drop them.
+- `needsVideoEncoding()` and `audioNeedingEncoding()` (audio stream positions) tell what's wrong.
+- The source is never changed, so it can be kept untouched. When only the audio doesn't play, `makePlayable('movie-audio.m4a', audioOnly: true)` writes just the audio streams (playable ones copied, others as AAC); stream it next to the source with `open(['movie.mkv', 'movie-audio.m4a'])->stream()->tracksFrom([0], 1)`, video from variant 0 and audio tracks from variant 1. Audio only throws `InvalidMediaException` when the video doesn't play either.
+
 ## Scenes, clips and reels
 
 @boostsnippet("A reel from scenes", "php")
@@ -621,6 +638,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `delivery.cache_disk`, `.cache_path`, `.url_lifetime`, `.lock_timeout` | Where packaged segments are cached and how they're served (`media:prune` trims the cache) |
 | `delivery.look_ahead`, `.look_ahead_via`, `.look_ahead_connection`, `.look_ahead_queue` | Segments packaged ahead of the player, and where (`queue`, `defer` or `null`) |
 | `ladder.hardware`, `.vaapi_device` | GPU encoding for `ladder()` (`MEDIA_LADDER_HARDWARE`: `none`, `vaapi`, `nvenc`, `qsv`) |
+| `playback.video_codecs`, `.audio_codecs`, `.video_codec`, `.crf`, `.preset`, `.audio_bitrate` | What browsers play through a direct stream, and how `makePlayable()` re-encodes the rest |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |

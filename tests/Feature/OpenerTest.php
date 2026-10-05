@@ -135,6 +135,48 @@ it('aligns a ladder to the segments of the source, so every variant is split the
         ->and($rendition->segments())->toEqual($media->keyframes()->segments());
 });
 
+it('checks whether browsers can play an opened file', function () {
+    Media::fake(['old.avi' => FakeProbe::video(codec: 'mpeg4'), 'new.mp4' => FakeProbe::video()]);
+
+    expect(Media::fromDisk('local')->open('old.avi')->playability()->isPlayable())->toBeFalse()
+        ->and(Media::fromDisk('local')->open(['old.avi', 'new.mp4'])->playability('new.mp4')->isPlayable())->toBeTrue();
+});
+
+it('makes a file playable, keeping subtitles in containers that carry them', function () {
+    Media::fake(['old.avi' => FakeProbe::video(codec: 'mpeg4', subtitles: ['eng'])]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('old.avi')->makePlayable('playable.mkv')->save();
+    Media::fromDisk('videos')->open('old.avi')->makePlayable('playable.mp4')->save();
+
+    Media::assertSaved('playable.mkv', 'videos');
+    Media::assertSaved('playable.mp4', 'videos');
+
+    [$mkv, $mp4] = Media::commands(Executable::FFMpeg);
+
+    expect($mkv)->toContain('0:V:0?', '0:a?', '0:s?', 'libx264')
+        ->and($mp4)->toContain('0:V:0?', '0:a?')
+        ->and($mp4)->not->toContain('0:s?');
+});
+
+it('makes only the audio playable, to stream next to the untouched video', function () {
+    Media::fake(['movie.mkv' => FakeProbe::video(audioLanguages: ['eng', 'jpn'])]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('movie.mkv')->makePlayable('movie-audio.m4a', audioOnly: true)->save();
+
+    Media::assertSaved('movie-audio.m4a', 'videos');
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('0:a', $arguments, true)
+        && in_array('-vn', $arguments, true)
+        && ! in_array('0:V:0?', $arguments, true));
+});
+
+it('needs a full copy when the video does not play', function () {
+    Media::fake(['old.avi' => FakeProbe::video(codec: 'mpeg4')]);
+
+    Media::fromDisk('local')->open('old.avi')->makePlayable('old-audio.m4a', audioOnly: true);
+})->throws(InvalidMediaException::class, "The video of old.avi doesn't play in browsers, so it needs a full playable copy.");
+
 it('needs a video stream for a ladder', function () {
     Media::fake(['song.m4a' => FakeProbe::audio()]);
 

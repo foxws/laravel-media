@@ -7,6 +7,7 @@ namespace Foxws\Media;
 use Foxws\Media\Delivery\DirectStream;
 use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Delivery\KeyframeIndexer;
+use Foxws\Media\Delivery\Playability;
 use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
@@ -201,6 +202,39 @@ class Opener
         }
 
         return $builder;
+    }
+
+    /**
+     * Whether browsers can play an opened file (the first one by default) through a direct stream,
+     * by the codecs in media.playback.
+     */
+    public function playability(?string $path = null): Playability
+    {
+        return new Playability($this->probe($path));
+    }
+
+    /**
+     * Copy the (first) opened file with every stream browsers can't play re-encoded, see
+     * playability(). Text subtitles are kept in containers other than MP4 and MOV, which can't
+     * carry them as they are, so an MKV output keeps every stream. Audio only writes just the
+     * audio streams, to stream next to the untouched file with tracksFrom(), when its video plays.
+     *
+     * @throws InvalidMediaException
+     */
+    public function makePlayable(string $path, bool $audioOnly = false): FFMpegBuilder
+    {
+        $playability = $this->playability();
+
+        if ($audioOnly && $playability->needsVideoEncoding()) {
+            throw InvalidMediaException::videoNotPlayable($this->mediaFor()->path());
+        }
+
+        $subtitles = ! $audioOnly && ! in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['mp4', 'm4v', 'mov'], true);
+        $maps = $audioOnly ? ['0:a'] : ['0:V:0?', '0:a?', ...($subtitles ? ['0:s?'] : [])];
+
+        return $this->ffmpeg()->addOutput($path, fn (Output $output): Output => $output
+            ->map(...$maps)
+            ->inFormat($playability->format($audioOnly)));
     }
 
     /**
