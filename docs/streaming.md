@@ -138,7 +138,7 @@ if (! $media->playability()->isPlayable()) {
 }
 ```
 
-- **What plays:** the codecs in `media.playback.video_codecs` (`h264,hevc,av1,vp9`) and `media.playback.audio_codecs` (`aac,mp3,opus,flac`), by their ffprobe name. H.264 also has to be 8-bit 4:2:0, the others 4:2:0 at 8 or 10 bits. Firefox on Linux doesn't decode HEVC, so leave `hevc` out to play everywhere.
+- **What plays:** the codecs in `media.playback.video_codecs` (`h264,hevc,av1,vp9`) and `media.playback.audio_codecs` (`aac,mp3,opus,flac`), by their ffprobe name. H.264 also has to be 8-bit 4:2:0, the others 4:2:0 at 8 or 10 bits. Firefox only decodes HEVC experimentally (in Nightly), so leave `hevc` out when Firefox has to play everything.
 - **What's re-encoded:** only the streams that don't play. When only the audio is the problem, the video is copied and the file is ready in seconds. Video is encoded with `media.playback.video_codec` (`libx264`, or `libx265` or `libsvtav1`), audio as AAC at `media.playback.audio_bitrate`.
 - **What's kept:** the first video stream (not cover art), every audio stream and, in containers other than MP4 and MOV, every subtitle stream. An MKV output keeps everything.
 - `playability()` also tells which streams need work: `needsVideoEncoding()` and `audioNeedingEncoding()`, with the positions of those audio streams. `makePlayable()` returns the ffmpeg builder, so `toDisk()`, `onProgress()` and `timeout()` work as usual.

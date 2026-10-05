@@ -111,8 +111,8 @@ return [
     |
     | The codecs browsers play through a direct stream, by their ffprobe name.
     | H.264 also has to be 8-bit 4:2:0, and the others 4:2:0 at 8 or 10 bits.
-    | Remove "hevc" when Firefox on Linux has to play everything. Streams that
-    | don't play are re-encoded by $opener->makePlayable(): video with
+    | Remove "hevc" for Firefox, which only decodes it experimentally. Streams
+    | that don't play are re-encoded by $opener->makePlayable(): video with
     | video_codec ("libx264", "libx265" or "libsvtav1") at the crf and preset
     | (the codec's defaults when null), audio as AAC at audio_bitrate kbit/s.
     |
