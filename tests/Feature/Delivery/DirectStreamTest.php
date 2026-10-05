@@ -10,6 +10,9 @@ use Foxws\Media\Delivery\PackageSegments;
 use Foxws\Media\Delivery\Segment;
 use Foxws\Media\Delivery\Subtitle;
 use Foxws\Media\Delivery\Track;
+use Foxws\Media\Encoding\Ladder;
+use Foxws\Media\Encoding\Rendition;
+use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
@@ -1068,4 +1071,83 @@ it('returns subtitle contents with or without a timestamp map', function () {
 
     expect($stream->subtitleContents(0))->toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHallo\n")
         ->and($stream->subtitleContents(0, 10))->toStartWith("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n");
+});
+
+it('lists the renditions encoded on request below the source', function () {
+    Media::fake(['1080.mp4' => FakeProbe::video(width: 1920, height: 1080)]);
+
+    $stream = Media::fromDisk('videos')->open('1080.mp4')->stream()->fragmented()->withTrickPlay()
+        ->withRenditions(new Ladder([new Rendition(1080, 5000), new Rendition(720, 2800), new Rendition(480, 1400)]));
+
+    $playlist = $stream->masterPlaylist(fn (int $variant, ?Track $track) => "{$variant}/{$track?->value}.m3u8");
+
+    expect(array_map(fn ($rendition) => $rendition->rendition->height, $stream->renditions()))->toBe([720, 480])
+        ->and($playlist)->toContain(
+            "#EXT-X-STREAM-INF:BANDWIDTH=2996000,RESOLUTION=1280x720,FRAME-RATE=30.000,CODECS=\"avc1.64002a,mp4a.40.2\",AUDIO=\"audio\"\n1/video.m3u8",
+            "RESOLUTION=854x480,FRAME-RATE=30.000,CODECS=\"avc1.64002a,mp4a.40.2\",AUDIO=\"audio\"\n2/video.m3u8",
+        )
+        ->and(substr_count($playlist, '#EXT-X-I-FRAME-STREAM-INF'))->toBe(1)
+        ->and($stream->mediaPlaylist(1, fn (Segment $segment, int $variant) => "{$variant}/{$segment->index}.m4s", Track::Video, fn () => 'init.mp4'))->toContain('1/0.m4s');
+});
+
+it('adds the renditions encoded on request to the dash manifest', function () {
+    Media::fake(['1080.mp4' => FakeProbe::video(width: 1920, height: 1080, duration: 12)]);
+
+    $manifest = Media::fromDisk('videos')->open('1080.mp4')->stream()
+        ->withRenditions(new Ladder([new Rendition(720, 2800)]))
+        ->dashManifest(fn (int $variant, Track $track) => "{$variant}/init.mp4", fn (Segment $segment, int $variant) => "{$variant}/{$segment->index}.m4s");
+
+    expect($manifest)->toContain('<Representation id="video-1" codecs="avc1.64002a" bandwidth="2996000" width="1280" height="720"', '1/init.mp4', '1/1.m4s');
+});
+
+it('encodes a segment of a rendition on its first request and caches it apart from the source', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(new Ladder([new Rendition(720, 2800)]));
+
+    $path = $stream->segment(1, 1, Track::Video);
+
+    expect($path)->toMatch('#^media-segments/[0-9a-f]{32}/6/renditions/720p-2800-[0-9a-f]{8}/video/1\.m4s$#')
+        ->and($stream->initSegment(1, Track::Video))->toBe(dirname($path).'/init.mp4')
+        ->and($stream->segment(0, 1, Track::Video))->not->toBe($path);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('scale=-2:720', $arguments, true)
+        && in_array('libx264', $arguments, true)
+        && in_array('5.999', $arguments, true)
+        && in_array('-copyts', $arguments, true)
+        && ! in_array('copy', $arguments, true));
+});
+
+it('offers only the video track of a rendition', function (?Track $track) {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+
+    Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(new Ladder([new Rendition(720, 2800)]))->segment(1, 0, $track);
+})->with([
+    'mpeg-ts' => [null],
+    'audio' => [Track::Audio],
+    'i-frames' => [Track::IFrames],
+])->throws(SegmentNotFoundException::class);
+
+it('encodes renditions on request as h264 only', function () {
+    Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(Ladder::standard()->codec(VideoCodec::Hevc));
+})->throws(InvalidArgumentException::class, 'Renditions encoded on request are H.264.');
+
+it('has no renditions without a ladder or a video', function () {
+    Media::fake(['song.m4a' => FakeProbe::audio(), 'video.mp4' => FakeProbe::video()]);
+
+    expect(Media::fromDisk('videos')->open('video.mp4')->stream()->renditions())->toBe([])
+        ->and(Media::fromDisk('videos')->open('song.m4a')->stream()->withRenditions(Ladder::standard())->renditions())->toBe([])
+        ->and(Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(Ladder::standard())->withRenditions(null)->renditions())->toBe([]);
+});
+
+it('queues the next segments of a rendition with its ladder', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 19)]);
+    $ladder = new Ladder([new Rendition(720, 2800), new Rendition(480, 1400)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions($ladder);
+
+    $stream->lookAhead(1)->segmentResponse(2, 0, Track::Video);
+
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [1]
+        && $job->renditions === $ladder
+        && $job->variant === 2);
 });

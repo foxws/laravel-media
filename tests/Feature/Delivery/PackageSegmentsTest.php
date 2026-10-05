@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Foxws\Media\Delivery\PackageSegments;
 use Foxws\Media\Delivery\Track;
+use Foxws\Media\Encoding\Ladder;
+use Foxws\Media\Encoding\Rendition;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\MediaFactory;
@@ -54,4 +56,17 @@ it('packages the segments of a later audio stream', function () {
 
     expect(Storage::disk('segments')->allFiles())->toContain(Media::fromDisk('videos')->open('video.mp4')->stream()->toCache('segments')->segment(0, 1, Track::Audio, 1));
     Media::assertRanTimes(Executable::FFMpeg, 1);
+});
+
+it('encodes the segments of a rendition', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $ladder = new Ladder([new Rendition(720, 2800)]);
+
+    new PackageSegments('videos', 'video.mp4', [1], Track::Video, 6.0, 'segments', renditions: $ladder, variant: 1)->handle(app(MediaFactory::class));
+
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->toCache('segments')->withRenditions($ladder);
+
+    expect(Storage::disk('segments')->exists($stream->segment(1, 1, Track::Video)))->toBeTrue();
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('scale=-2:720', $arguments, true));
 });

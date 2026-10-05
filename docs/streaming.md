@@ -100,6 +100,23 @@ use Foxws\Media\FFMpeg\Scene;
 - **On the seek bar:** `chaptersUrl()` serves the chapters as WebVTT, for Shaka Player's `addChaptersTrack()`. Each chapter ends where the next one starts.
 - **Other classes and gaps:** `chapterTrackFrom(['chapter', 'intro'], 'Main')` lists other marker classes as chapters, and fills the gaps between them with a cue titled `Main`, so the last chapter's title doesn't stay on screen until the end.
 
+## Renditions on request
+
+`withRenditions()` adds smaller variants of the source video that are encoded one segment at a time, the first time a player requests them, and then cached like the others. Nothing is encoded ahead, so a 1080p video offers 720p and 480p straight away, and players such as Shaka Player list them in their quality menu:
+
+```php
+MediaStream::define('videos', fn (Video $video) => Media::fromDisk('videos')
+    ->open($video->path)
+    ->stream()
+    ->withRenditions(new Ladder([new Rendition(720, 2800), new Rendition(480, 1400)])));
+```
+
+- **Sizes:** only renditions smaller than the source are offered; the source stays the top variant, copied as it is.
+- **Switching:** each rendition segment is cut where the source's segment starts and begins with a keyframe, so players switch between the source and its renditions at every segment, also when they pick a size on their own.
+- **Encoding:** H.264 in High profile, at a level that fits the size (4.2 up to 1080p), so manifests name the codec before anything is encoded. Every segment is encoded with the same settings and shares one initialization segment. The ladder's `hardware()` or `media.ladder.hardware` decodes and encodes on the GPU; the source then has to be a format the GPU decodes.
+- **Cost:** the first request of a rendition segment waits for its encode, roughly a few seconds per segment on the CPU and much less on a GPU. Look-ahead encodes the next segments in the background, so playback keeps up once it's started.
+- **Limits:** fragmented streams only (CMAF HLS and DASH; `hlsUrl()` lists the opened files), video only (the audio track is shared), and trick play stays on the source.
+
 ## Trick play
 
 ```php
