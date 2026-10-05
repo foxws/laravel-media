@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.1.1 - 2026-10-05
+
+<!-- Release notes generated using configuration in .github/release.yml at 2e9004fcb3abe65c6a3ace2df3f6953c572a5dcb -->
+### What's Changed
+
+#### Other Changes
+
+* Fit the thumbnail grid to a single sheet's thumbnails by @francoism90 in https://github.com/foxws/laravel-media/pull/44
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.1.0...0.1.1
+
 ## 0.1.0 - 2026-10-05
 
 <!-- Release notes generated using configuration in .github/release.yml at cdf916008b40d36a1a91ed526d3b0775a78b347d -->
