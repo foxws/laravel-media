@@ -1168,3 +1168,17 @@ it('encodes renditions on request with the delivery hardware, on the cpu when it
 
     expect($stream->renditions()[0]->ladder->hardware)->toBe(HardwareAcceleration::None);
 });
+
+it('decodes renditions on request on the cpu when the gpu cannot decode the source', function () {
+    config(['media.delivery.hardware' => 'vaapi']);
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13, codec: 'av1')]);
+
+    expect(HardwareAcceleration::Vaapi->isAvailable())->toBeTrue();
+
+    Media::failNext(Executable::FFMpeg, 'Impossible to convert between the formats supported by the filter');
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withRenditions(new Ladder([new Rendition(720, 2800)]));
+
+    expect($stream->renditions()[0]->ladder->hardware)->toBe(HardwareAcceleration::Vaapi)
+        ->and($stream->renditions()[0]->ladder->hardwareDecoding)->toBeFalse()
+        ->and($stream->renditions()[0]->inputArguments())->toBe(['-vaapi_device', '/dev/dri/renderD128']);
+});

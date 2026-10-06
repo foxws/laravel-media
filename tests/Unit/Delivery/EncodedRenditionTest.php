@@ -50,3 +50,10 @@ it('encodes a segment scaled, with one keyframe at its start, in high profile', 
         ->and(encodedRendition()->inputArguments())->toBe([])
         ->and(encodedRendition(ladder: Ladder::standard()->hardware(HardwareAcceleration::Vaapi))->inputArguments())->toContain('-hwaccel', 'vaapi');
 });
+
+it('uploads segments decoded on the cpu when the gpu cannot decode the source', function () {
+    $rendition = encodedRendition(ladder: Ladder::standard()->hardware(HardwareAcceleration::Vaapi)->hardwareDecoding(false));
+
+    expect($rendition->inputArguments())->toBe(['-vaapi_device', '/dev/dri/renderD128'])
+        ->and($rendition->outputArguments(12.0))->toContain('format=nv12,hwupload,scale_vaapi=w=-2:h=720:format=nv12');
+});

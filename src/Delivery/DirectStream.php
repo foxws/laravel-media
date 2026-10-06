@@ -168,8 +168,7 @@ class DirectStream
      * Offer smaller H.264 variants of the source video, the ladder's renditions below its size,
      * encoded one segment at a time when first requested and then cached like the others. They're
      * encoded with the ladder's hardware, or media.delivery.hardware, on the CPU when its GPU can't
-     * be opened. They
-     * line up with the source's segments, so players switch between them, and the source stays
+     * be opened, and decoded on the CPU when it can't decode the source. They line up with the source's segments, so players switch between them, and the source stays
      * the top variant. Fragmented streams only; trick play stays on the source.
      *
      * @throws InvalidArgumentException
@@ -207,7 +206,9 @@ class DirectStream
         $sides = array_filter([$source->width, $source->height], fn (?int $side): bool => $side !== null && $side > 0);
         $shortSide = $sides !== [] ? min($sides) : 0;
 
-        $ladder = $this->renditionLadder->hardware(($this->renditionLadder->hardware ?? HardwareAcceleration::forDelivery())->orCpu());
+        $hardware = ($this->renditionLadder->hardware ?? HardwareAcceleration::forDelivery())->orCpu();
+        $ladder = $this->renditionLadder->hardware($hardware)
+            ->hardwareDecoding($this->renditionLadder->hardwareDecoding && $hardware->canDecode($this->media($variant), $source));
 
         return $this->encodedRenditions = array_values(array_map(
             fn (Rendition $rendition): EncodedRendition => new EncodedRendition($ladder, $rendition, $source),

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Foxws\Media\Encoding;
 
 use Foxws\Media\Executables\Executable;
+use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filters\Custom;
 use Foxws\Media\Filters\Filter;
 use Foxws\Media\Filters\Scale;
+use Foxws\Media\Probe\VideoStream;
 use Foxws\Media\Process\Runner;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
@@ -17,8 +19,9 @@ use Throwable;
 /**
  * Where a ladder decodes, scales and encodes: on the CPU, or on the GPU with VAAPI (Intel and AMD on
  * Linux), NVENC (NVIDIA) or Quick Sync (Intel). Frames stay on the GPU between those steps. Sources
- * the GPU may not decode, such as those made playable, are decoded on the CPU and uploaded. VAAPI
- * and Quick Sync open the render device in media.ladder.vaapi_device.
+ * the GPU can't decode, such as AV1 or 10-bit video on many GPUs, or may not, such as those made
+ * playable, are decoded on the CPU and uploaded. VAAPI and Quick Sync open the render device in
+ * media.ladder.vaapi_device.
  */
 enum HardwareAcceleration: string
 {
@@ -100,6 +103,47 @@ enum HardwareAcceleration: string
     }
 
     /**
+     * Whether the GPU decodes a source and scales its frames, checked by decoding and scaling its
+     * first frame once per codec, profile and pixel format, and remembered for an hour in the
+     * media.delivery.cache_store. When the GPU can't, ffmpeg falls back to frames in memory that
+     * the GPU's scale filter refuses, so those sources are decoded on the CPU and uploaded instead.
+     */
+    public function canDecode(Media $media, VideoStream $source): bool
+    {
+        if ($this === self::None) {
+            return true;
+        }
+
+        $kind = [self::device(), $source->codecName, $source->get('profile'), $source->pixelFormat];
+
+        return (bool) Cache::store(Config::get('media.delivery.cache_store'))->remember(
+            "media:hardware:{$this->value}:decode:".hash('xxh128', serialize($kind)),
+            3600,
+            function () use ($media): bool {
+                try {
+                    app(Runner::class)->run(Executable::FFMpeg, [
+                        '-hide_banner',
+                        '-nostdin',
+                        '-loglevel', 'error',
+                        '-xerror',
+                        ...$this->inputArguments(),
+                        '-i', $media->inputPath(),
+                        '-map', '0:v:0',
+                        '-frames:v', '1',
+                        '-filter:v', (string) $this->scale(-2, 64),
+                        '-f', 'null',
+                        '-',
+                    ], timeout: 60);
+
+                    return true;
+                } catch (Throwable) {
+                    return false;
+                }
+            },
+        );
+    }
+
+    /**
      * @return list<string>
      */
     public function inputArguments(): array
@@ -172,9 +216,23 @@ enum HardwareAcceleration: string
 
     /**
      * Scale to a size, with -2 for the side that follows the aspect ratio. GPU frames are scaled to
-     * 8-bit 4:2:0, which every hardware encoder takes, also from 10-bit sources.
+     * 8-bit 4:2:0, which every hardware encoder takes, also from 10-bit sources. Uploaded, frames
+     * decoded on the CPU are moved to the GPU first, see uploadArguments().
      */
-    public function scale(int $width, int $height): Filter
+    public function scale(int $width, int $height, bool $uploaded = false): Filter
+    {
+        $scale = $this->scaleFilter($width, $height);
+
+        if (! $uploaded || $this === self::None) {
+            return $scale;
+        }
+
+        $upload = $this === self::Nvenc ? 'format=nv12,hwupload_cuda' : (string) $this->upload();
+
+        return Custom::video("{$upload},{$scale}");
+    }
+
+    protected function scaleFilter(int $width, int $height): Filter
     {
         return match ($this) {
             self::None => Scale::to($width > 0 ? $width : null, $height > 0 ? $height : null),

@@ -85,6 +85,17 @@ it('encodes on the gpu with the hardware encoder', function () {
     ]);
 });
 
+it('decodes on the cpu and uploads the frames when the gpu cannot decode the source', function () {
+    $source = Probe::fromArray(FakeProbe::video())->videoStream();
+    $ladder = Ladder::standard()->hardware(HardwareAcceleration::Vaapi);
+
+    expect($ladder->hardwareDecoding)->toBeTrue()
+        ->and($ladder->inputArguments())->toContain('-hwaccel')
+        ->and((string) $ladder->scale(new Rendition(720, 2800), $source))->toBe('scale_vaapi=w=-2:h=720:format=nv12')
+        ->and($ladder->hardwareDecoding(false)->inputArguments())->toBe(['-vaapi_device', '/dev/dri/renderD128'])
+        ->and((string) $ladder->hardwareDecoding(false)->scale(new Rendition(720, 2800), $source))->toBe('format=nv12,hwupload,scale_vaapi=w=-2:h=720:format=nv12');
+});
+
 it('uses the configured acceleration unless the ladder sets one', function () {
     config(['media.ladder.hardware' => 'nvenc']);
 

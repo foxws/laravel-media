@@ -113,7 +113,7 @@ it('encodes a ladder in one ffmpeg run with an output per rendition that fits', 
         ->save();
 
     expect($result->paths())->toBe(['videos/1/720p-2800.mp4', 'videos/1/480p-1400.mp4', 'videos/1/360p-800.mp4']);
-    Media::assertRanTimes(Executable::FFMpeg, 2);
+    Media::assertRanTimes(Executable::FFMpeg, 3);
     Media::assertRan(Executable::FFMpeg, fn (array $arguments) => array_slice($arguments, 5, 7) === ['-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi', '-vaapi_device', '/dev/dri/renderD128', '-i']
         && count(array_keys($arguments, '-map', true)) === 6
         && in_array('scale_vaapi=w=-2:h=480:format=nv12', $arguments, true)
@@ -200,6 +200,19 @@ it('encodes a ladder on the cpu when its gpu cannot be opened', function () {
 
     expect(Media::commands(Executable::FFMpeg)[1])->toContain('libx264', 'scale=-2:480')
         ->not->toContain('-hwaccel', 'h264_vaapi');
+});
+
+it('decodes a ladder on the cpu and uploads it when the gpu cannot decode the source', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(width: 1280, height: 720, codec: 'av1')]);
+    Storage::fake('renditions');
+
+    expect(HardwareAcceleration::Vaapi->isAvailable())->toBeTrue();
+
+    Media::failNext(Executable::FFMpeg, 'Impossible to convert between the formats supported by the filter');
+    Media::fromDisk('renditions')->open('video.mp4')->ladder(Ladder::standard()->hardware(HardwareAcceleration::Vaapi))->toDisk('renditions')->save();
+
+    expect(Media::commands(Executable::FFMpeg)[2])->toContain('-vaapi_device', 'format=nv12,hwupload,scale_vaapi=w=-2:h=480:format=nv12', 'h264_vaapi')
+        ->not->toContain('-hwaccel');
 });
 
 it('needs a video stream for a ladder', function () {

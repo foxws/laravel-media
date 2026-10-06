@@ -176,7 +176,8 @@ class Opener
      * Encode the (first) opened file into every rendition of the ladder that fits its size, in one
      * ffmpeg run with an output per rendition, e.g. ladder(Ladder::standard())->toDisk('renditions')->save().
      * The output paths replace {height} and {bitrate} in the pattern. A ladder aligned to the source
-     * gets keyframes where the source's segments start, from its keyframe index.
+     * gets keyframes where the source's segments start, from its keyframe index. Sources the GPU
+     * can't decode are decoded on the CPU and uploaded to it.
      *
      * @throws InvalidMediaException
      */
@@ -184,14 +185,15 @@ class Opener
     {
         $probe = $this->probe();
         $source = $probe->videoStream() ?? throw InvalidMediaException::noVideo($this->mediaFor()->path());
-        $ladder = $ladder->hardware($ladder->acceleration()->orCpu());
+        $hardware = $ladder->acceleration()->orCpu();
+        $ladder = $ladder->hardware($hardware)->hardwareDecoding($ladder->hardwareDecoding && $hardware->canDecode($this->mediaFor(), $source));
 
         if ($ladder->alignToSource) {
             $start = (float) $probe->format()->get('start_time', 0);
             $ladder = $ladder->keyframesAt(array_map(fn (Segment $segment): float => $segment->start - $start, $this->keyframes()->segments($ladder->interval())));
         }
 
-        $builder = $this->ffmpeg()->addInputArgs($ladder->acceleration()->inputArguments());
+        $builder = $this->ffmpeg()->addInputArgs($ladder->inputArguments());
 
         foreach ($ladder->for($source) as $rendition) {
             $builder->addOutput(
