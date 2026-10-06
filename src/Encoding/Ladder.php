@@ -25,6 +25,7 @@ final readonly class Ladder
      * @param  HardwareAcceleration|null  $hardware  media.ladder.hardware when null.
      * @param  bool  $alignToSource  Whether ladder() places the keyframes where the source's segments start.
      * @param  list<float>  $keyframes  Seconds to place the keyframes at, instead of every keyframe interval.
+     * @param  bool  $hardwareDecoding  Whether the GPU decodes the source, or the CPU decodes it and uploads the frames.
      */
     public function __construct(
         public array $renditions,
@@ -35,6 +36,7 @@ final readonly class Ladder
         public ?HardwareAcceleration $hardware = null,
         public bool $alignToSource = false,
         public array $keyframes = [],
+        public bool $hardwareDecoding = true,
     ) {
         if ($renditions === []) {
             throw new InvalidArgumentException('A ladder needs at least one rendition.');
@@ -80,6 +82,15 @@ final readonly class Ladder
     public function hardware(HardwareAcceleration $hardware): self
     {
         return $this->with(['hardware' => $hardware]);
+    }
+
+    /**
+     * Decode the source on the GPU, or on the CPU and upload the frames to the GPU to scale and
+     * encode them, for sources the GPU can't decode.
+     */
+    public function hardwareDecoding(bool $decode = true): self
+    {
+        return $this->with(['hardwareDecoding' => $decode]);
     }
 
     /**
@@ -142,7 +153,20 @@ final readonly class Ladder
     {
         $portrait = ($source->height ?? 0) > ($source->width ?? 0);
 
-        return $this->acceleration()->scale($portrait ? $rendition->height : -2, $portrait ? -2 : $rendition->height);
+        return $this->acceleration()->scale($portrait ? $rendition->height : -2, $portrait ? -2 : $rendition->height, uploaded: ! $this->hardwareDecoding);
+    }
+
+    /**
+     * The arguments placed before the input: those that decode on the GPU, or that open it for
+     * frames decoded on the CPU.
+     *
+     * @return list<string>
+     */
+    public function inputArguments(): array
+    {
+        $hardware = $this->acceleration();
+
+        return $this->hardwareDecoding ? $hardware->inputArguments() : $hardware->uploadArguments();
     }
 
     /**

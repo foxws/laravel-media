@@ -6,6 +6,7 @@ use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
+use Foxws\Media\Testing\FakeProbe;
 
 it('decodes on the gpu and keeps the frames there', function (HardwareAcceleration $hardware, array $arguments) {
     expect($hardware->inputArguments())->toBe($arguments);
@@ -34,6 +35,15 @@ it('scales with the filter of each acceleration', function (HardwareAcceleration
     'vaapi' => [HardwareAcceleration::Vaapi, 'scale_vaapi=w=-2:h=720:format=nv12'],
     'nvenc' => [HardwareAcceleration::Nvenc, 'scale_cuda=-2:720:format=yuv420p'],
     'qsv' => [HardwareAcceleration::Qsv, 'scale_qsv=w=-2:h=720:format=nv12'],
+]);
+
+it('uploads frames decoded on the cpu before scaling them on the gpu', function (HardwareAcceleration $hardware, string $filter) {
+    expect((string) $hardware->scale(-2, 720, uploaded: true))->toBe($filter);
+})->with([
+    'none' => [HardwareAcceleration::None, 'scale=-2:720'],
+    'vaapi' => [HardwareAcceleration::Vaapi, 'format=nv12,hwupload,scale_vaapi=w=-2:h=720:format=nv12'],
+    'nvenc' => [HardwareAcceleration::Nvenc, 'format=nv12,hwupload_cuda,scale_cuda=-2:720:format=yuv420p'],
+    'qsv' => [HardwareAcceleration::Qsv, 'format=nv12,hwupload=extra_hw_frames=64,scale_qsv=w=-2:h=720:format=nv12'],
 ]);
 
 it('names the encoder of each codec', function () {
@@ -111,4 +121,33 @@ it('needs no check for the cpu', function () {
 
     expect(HardwareAcceleration::None->orCpu())->toBe(HardwareAcceleration::None);
     Media::assertNothingRan();
+});
+
+it('checks once per kind of source whether the gpu decodes and scales it', function () {
+    Media::fake(['h264.mp4' => FakeProbe::video(), 'other.mp4' => FakeProbe::video(), 'av1.mp4' => FakeProbe::video(codec: 'av1')]);
+
+    $decodes = fn (string $path): bool => HardwareAcceleration::Vaapi->canDecode(
+        ($opener = Media::fromDisk('local')->open($path))->mediaFor(),
+        $opener->probe()->videoStream(),
+    );
+
+    expect($decodes('h264.mp4'))->toBeTrue()
+        ->and($decodes('other.mp4'))->toBeTrue()
+        ->and($decodes('av1.mp4'))->toBeTrue();
+
+    Media::assertRanTimes(Executable::FFMpeg, 2);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('-xerror', $arguments, true)
+        && in_array('-hwaccel', $arguments, true)
+        && in_array('scale_vaapi=w=-2:h=64:format=nv12', $arguments, true));
+});
+
+it('knows the gpu cannot decode a source when its first frame fails', function () {
+    Media::fake(['av1.mp4' => FakeProbe::video(codec: 'av1')])->failNext(Executable::FFMpeg, 'Impossible to convert between the formats supported by the filter');
+
+    $opener = Media::fromDisk('local')->open('av1.mp4');
+
+    expect(HardwareAcceleration::Vaapi->canDecode($opener->mediaFor(), $opener->probe()->videoStream()))->toBeFalse()
+        ->and(HardwareAcceleration::None->canDecode($opener->mediaFor(), $opener->probe()->videoStream()))->toBeTrue();
+
+    Media::assertRanTimes(Executable::FFMpeg, 1);
 });

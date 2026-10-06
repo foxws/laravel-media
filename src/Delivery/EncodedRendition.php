@@ -91,13 +91,14 @@ final readonly class EncodedRendition
     }
 
     /**
-     * The arguments placed before the input, to decode on the GPU when the ladder encodes there.
+     * The arguments placed before the input, to decode on the GPU, or open it for frames decoded
+     * on the CPU, when the ladder encodes there.
      *
      * @return list<string>
      */
     public function inputArguments(): array
     {
-        return $this->ladder->acceleration()->inputArguments();
+        return $this->ladder->inputArguments();
     }
 
     /**
