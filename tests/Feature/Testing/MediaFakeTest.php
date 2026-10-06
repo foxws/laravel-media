@@ -201,6 +201,34 @@ it('fakes the output of executables from other packages', function () {
     Media::assertRan(AddOnExecutable::Encoder, fn (array $arguments) => $arguments === ['--target', '95']);
 });
 
+it('streams the faked output and error output of executables from other packages', function () {
+    Media::fake()->respondUsing(AddOnExecutable::Encoder, fn (array $arguments) => Process::result(output: 'crf 30', errorOutput: '50%, 24 fps'));
+    $output = '';
+    $errorOutput = '';
+
+    $result = Runner::make()->run(
+        AddOnExecutable::Encoder,
+        ['--target', '95'],
+        onOutput: function (string $chunk) use (&$output) {
+            $output .= $chunk;
+        },
+        onErrorOutput: function (string $chunk) use (&$errorOutput) {
+            $errorOutput .= $chunk;
+        },
+    );
+
+    expect($output)->toBe("crf 30\n")
+        ->and($errorOutput)->toBe("50%, 24 fps\n")
+        ->and($result->errorOutput)->toBe("50%, 24 fps\n");
+});
+
+it('fails runs of executables from other packages with a faked exit code', function () {
+    Media::fake()->respondUsing(AddOnExecutable::Encoder, fn (array $arguments) => Process::result(errorOutput: 'No space left on device', exitCode: 1));
+
+    expect(fn () => Runner::make()->run(AddOnExecutable::Encoder, ['--target', '95']))
+        ->toThrow(fn (ProcessFailedException $exception) => expect($exception->reason)->toBe(FailureReason::NoSpace));
+});
+
 it('records runs of executables from other packages without a faked output', function () {
     Media::fake();
 

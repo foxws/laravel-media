@@ -8,6 +8,7 @@ use Closure;
 use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\MediaFactory;
+use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Assert as PHPUnit;
@@ -27,7 +28,7 @@ class MediaFake extends MediaFactory
     /** @var array<string, list<string>> */
     protected array $failures = [];
 
-    /** @var array<string, Closure(list<string>): string> */
+    /** @var array<string, Closure(list<string>): (string|ProcessResult)> */
     protected array $responses = [];
 
     /**
@@ -94,9 +95,11 @@ class MediaFake extends MediaFactory
 
     /**
      * Fake the runs of an executable from another package: the callback receives the arguments
-     * and returns the output, and can write the files the executable would.
+     * and returns the output, or a Process::result() with the output, error output and exit code,
+     * and can write the files the executable would. Both outputs are streamed to the run's
+     * callbacks, and a non-zero exit code fails the run.
      *
-     * @param  Closure(list<string>): string  $respond
+     * @param  Closure(list<string>): (string|ProcessResult)  $respond
      */
     public function respondUsing(Binary $executable, Closure $respond): static
     {
@@ -106,13 +109,13 @@ class MediaFake extends MediaFactory
     }
 
     /**
-     * The output of a faked run of an executable from another package.
+     * The result of a faked run of an executable from another package.
      *
      * @param  list<string>  $arguments
      *
      * @internal
      */
-    public function responseFor(Binary $executable, array $arguments): string
+    public function responseFor(Binary $executable, array $arguments): string|ProcessResult
     {
         return isset($this->responses[$executable->identifier()]) ? ($this->responses[$executable->identifier()])($arguments) : '';
     }
