@@ -39,8 +39,32 @@ class FakeRunner extends Runner
                 ? $this->packets((string) end($arguments))
                 : (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
             Executable::FFMpeg => [0, $this->ffmpeg($arguments, $onOutput), ''],
-            default => [0, $this->fake->responseFor($executable, $arguments), ''],
+            default => $this->respond($executable, $arguments, $onOutput),
         };
+    }
+
+    /**
+     * Stream the faked output and error output of an executable from another package to the callback.
+     *
+     * @param  list<string>  $arguments
+     * @param  (callable(string, string=): mixed)|null  $onOutput
+     * @return array{int, string, string}
+     */
+    protected function respond(Binary $executable, array $arguments, ?callable $onOutput): array
+    {
+        $result = $this->fake->responseFor($executable, $arguments);
+
+        [$exitCode, $output, $errorOutput] = is_string($result)
+            ? [0, $result, '']
+            : [$result->exitCode() ?? 1, $result->output(), $result->errorOutput()];
+
+        foreach (['out' => $output, 'err' => $errorOutput] as $type => $chunk) {
+            if ($onOutput !== null && $chunk !== '') {
+                $onOutput($chunk, $type);
+            }
+        }
+
+        return [$exitCode, $output, $errorOutput];
     }
 
     /**

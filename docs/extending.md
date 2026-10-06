@@ -76,7 +76,14 @@ app(Runner::class)->run(
 );
 ```
 
-In tests, `$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => 'output')` fakes its output, and the assertions accept any `Binary`.
+In tests, `$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => 'output')` fakes its output, and the assertions accept any `Binary`. Return `Process::result()` to fake the error output and exit code too: both outputs are streamed to `onOutput` and `onErrorOutput`, and a non-zero exit code fails the run like a real one:
+
+```php
+$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => Process::result(
+    output: 'crf 30',
+    errorOutput: '50%, 24 fps',
+));
+```
 
 ## Packager drivers
 
