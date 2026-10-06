@@ -626,6 +626,7 @@ Opener::macro('encoder', fn () => new EncoderBuilder($this));             // $op
 
 - `Runner::run($binary, $arguments, environment: ['SVT_LOG' => '1'])` runs it with progress, cancelling, events, logging and redacted keys, like ffmpeg.
 - `onOutput` and `onErrorOutput` receive standard output and error output as they stream in; throw `ProcessCancelledException` from either to stop the run. Pass `logWarnings: false` when the program reports progress or results on the error output, so successful runs aren't logged as warnings.
+- `Filters\Number::format($number, decimals: 4)` formats numbers for options and filter graphs without trailing zeros or locale separators.
 - `Opener` and `MediaFactory` take macros, and the `Media` facade forwards `MediaFactory` macros.
 - In tests, `$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => '...')` fakes its output, and the usual assertions accept any `Binary`. Return `Process::result(output: ..., errorOutput: ..., exitCode: ...)` to stream error output to `onErrorOutput` or fail the run.
 

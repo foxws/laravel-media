@@ -76,6 +76,8 @@ app(Runner::class)->run(
 );
 ```
 
+`Foxws\Media\Filters\Number::format($number, decimals: 4)` formats numbers for filter graphs and command-line options, without trailing zeros or locale separators: `30.25`, not `30.2500` or `30,25`.
+
 In tests, `$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => 'output')` fakes its output, and the assertions accept any `Binary`. Return `Process::result()` to fake the error output and exit code too: both outputs are streamed to `onOutput` and `onErrorOutput`, and a non-zero exit code fails the run like a real one:
 
 ```php
