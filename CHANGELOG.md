@@ -2,6 +2,19 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.4 - 2026-10-06
+
+<!-- Release notes generated using configuration in .github/release.yml at 44acfd7787eab5a6a1b69a4388f31df1c79578d2 -->
+### What's Changed
+
+#### Other Changes
+
+* Fake the error output and exit code of add-on executables by @francoism90 in https://github.com/foxws/laravel-media/pull/53
+* Link the README to the documentation on foxws.nl by @francoism90 in https://github.com/foxws/laravel-media/pull/54
+* Make Number public with a number of decimals by @francoism90 in https://github.com/foxws/laravel-media/pull/55
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.3...0.3.4
+
 ## 0.3.3 - 2026-10-06
 
 <!-- Release notes generated using configuration in .github/release.yml at 17d697dabfd366f9f62e374149f4a07e26fde404 -->
