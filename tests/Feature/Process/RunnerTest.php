@@ -118,6 +118,41 @@ it('streams standard output to the output callback', function () {
     expect($output)->toContain('first')->toContain('second')->not->toContain('warning');
 });
 
+it('streams the error output to the error output callback', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Process::fake(['*' => Process::result(output: 'result', errorOutput: "crf 32 VMAF 95.10\ncrf 28 VMAF 96.40\n")]);
+    $output = '';
+    $errorOutput = '';
+
+    Runner::make()->run(
+        Executable::FFMpeg,
+        ['-version'],
+        onOutput: function (string $chunk) use (&$output) {
+            $output .= $chunk;
+        },
+        onErrorOutput: function (string $chunk) use (&$errorOutput) {
+            $errorOutput .= $chunk;
+        },
+    );
+
+    expect($errorOutput)->toContain('crf 32 VMAF 95.10')->toContain('crf 28 VMAF 96.40')->not->toContain('result')
+        ->and($output)->toContain('result')->not->toContain('VMAF');
+});
+
+it('stops a running process that is cancelled from its error output callback', function () {
+    $script = sys_get_temp_dir().'/laravel-media-reporting-ffmpeg';
+    file_put_contents($script, "#!/bin/sh\necho 'encoding' >&2\nsleep 10\n");
+    chmod($script, 0755);
+    config(['media.executables.ffmpeg' => $script]);
+    app(Executables::class)->flush();
+    $startedAt = microtime(true);
+
+    expect(fn () => Runner::make()->run(Executable::FFMpeg, [], onErrorOutput: fn () => throw ProcessCancelledException::make()))
+        ->toThrow(fn (ProcessFailedException $exception) => expect($exception)->reason->toBe(FailureReason::Cancelled));
+
+    expect(microtime(true) - $startedAt)->toBeLessThan(5);
+})->skipOnWindows();
+
 it('dispatches to an event fake set up after the runner was resolved', function () {
     fakeExecutable(Executable::FFMpeg);
     Process::fake();
@@ -177,6 +212,26 @@ it('logs failures with their report context and warnings of successful runs', fu
     expect($records[0])->level->toBe('warning')->context->toMatchArray(['warnings' => 'Past duration 0.99 too large'])
         ->and($records[1]['level'])->toBe('error')
         ->and($records[1]['context'])->toMatchArray(['reason' => 'no_space', 'retryable' => true, 'error_output' => 'No space left on device']);
+});
+
+it('skips the warnings of a successful run when asked to', function () {
+    fakeExecutable(Executable::FFMpeg);
+    $logger = new class extends AbstractLogger
+    {
+        /** @var list<mixed> */
+        public array $levels = [];
+
+        public function log($level, Stringable|string $message, array $context = []): void
+        {
+            $this->levels[] = $level;
+        }
+    };
+    Process::fake(['*' => Process::result(errorOutput: 'crf 32 VMAF 95.10')]);
+
+    $result = new Runner(app(Executables::class), $logger)->run(Executable::FFMpeg, ['-version'], logWarnings: false);
+
+    expect($logger->levels)->not->toContain('warning')
+        ->and($result->errorOutput)->toContain('crf 32 VMAF 95.10');
 });
 
 it('stops a running process, as when a queue job times out', function () {

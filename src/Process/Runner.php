@@ -51,16 +51,18 @@ class Runner
     ) {}
 
     /**
-     * Run the executable with the given arguments. The output callback receives
-     * standard output as it streams in, e.g. to parse progress.
+     * Run the executable with the given arguments. The output callbacks receive standard
+     * output and error output as they stream in, e.g. to parse progress. Turn off
+     * logWarnings for programs that report their progress or results on the error output.
      *
      * @param  list<string>  $arguments
      * @param  (callable(string): mixed)|null  $onOutput
      * @param  array<string, string>  $environment  Extra environment variables for the process.
+     * @param  (callable(string): mixed)|null  $onErrorOutput
      *
      * @throws ProcessFailedException
      */
-    public function run(Binary $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null, array $environment = []): Result
+    public function run(Binary $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null, array $environment = [], ?callable $onErrorOutput = null, bool $logWarnings = true): Result
     {
         $command = [$this->executables->path($executable), ...$arguments];
 
@@ -75,7 +77,7 @@ class Runner
         $timeout ??= $this->timeout;
 
         try {
-            [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $onOutput, $environment);
+            [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $this->outputHandler($onOutput, $onErrorOutput), $environment);
         } catch (ProcessCancelledException) {
             $this->fail(ProcessFailedException::cancelled(
                 new Result($executable, $redacted, 130, '', '', (hrtime(true) - $startedAt) / 1e9),
@@ -100,7 +102,7 @@ class Runner
             $this->fail(ProcessFailedException::for($result));
         }
 
-        if (trim($result->errorOutput) !== '') {
+        if ($logWarnings && trim($result->errorOutput) !== '') {
             $this->logger?->warning("{$executable->identifier()} reported warnings", [
                 'command' => $redacted,
                 'warnings' => trim($result->errorOutput),
@@ -110,6 +112,28 @@ class Runner
         Event::dispatch(new ProcessCompleted($result));
 
         return $result;
+    }
+
+    /**
+     * One callback for execute() that passes each chunk to the callback for its stream.
+     *
+     * @param  (callable(string): mixed)|null  $onOutput
+     * @param  (callable(string): mixed)|null  $onErrorOutput
+     * @return (callable(string, string=): void)|null
+     */
+    protected function outputHandler(?callable $onOutput, ?callable $onErrorOutput): ?callable
+    {
+        if ($onOutput === null && $onErrorOutput === null) {
+            return null;
+        }
+
+        return function (string $output, string $type = 'out') use ($onOutput, $onErrorOutput): void {
+            $callback = $type === 'err' ? $onErrorOutput : $onOutput;
+
+            if ($callback !== null) {
+                $callback($output);
+            }
+        };
     }
 
     /**
@@ -128,9 +152,10 @@ class Runner
 
     /**
      * Run the command and return its exit code, output and error output.
+     * The output callback receives each chunk with its type: "out" or "err".
      *
      * @param  list<string>  $command
-     * @param  (callable(string): mixed)|null  $onOutput
+     * @param  (callable(string, string=): mixed)|null  $onOutput
      * @param  array<string, string>  $environment
      * @return array{int, string, string}
      */
@@ -142,8 +167,8 @@ class Runner
         // The callback goes to start(), because Symfony already reads available
         // output when starting, which a callback passed to wait() would miss.
         $process = Process::timeout($timeout)->env($environment)->start($command, function (string $type, string $output) use ($onOutput, $id): void {
-            if ($type === 'out' && $onOutput !== null && isset($this->streaming[$id])) {
-                $onOutput($output);
+            if ($onOutput !== null && isset($this->streaming[$id])) {
+                $onOutput($output, $type);
             }
         });
 
