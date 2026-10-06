@@ -16,7 +16,7 @@ Probe, encode, package and stream audio and video in Laravel with ffprobe and ff
 
 It builds ffmpeg commands directly, without php-ffmpeg underneath, so any ffmpeg option is available without waiting on a package release.
 
-See the [full documentation](docs/index.md): [Installation](docs/installation.md), [Opening and probing](docs/probing.md), [Encoding](docs/encoding.md), [Streaming](docs/streaming.md), [Packaging](docs/packaging.md), [Queues, progress and errors](docs/queues.md), [Testing](docs/testing.md), [Configuration](docs/configuration.md), [Extending](docs/extending.md).
+See the [full documentation](https://foxws.nl/laravel-media): [Installation](https://foxws.nl/laravel-media/installation), [Opening and probing](https://foxws.nl/laravel-media/probing), [Encoding](https://foxws.nl/laravel-media/encoding), [Streaming](https://foxws.nl/laravel-media/streaming), [Packaging](https://foxws.nl/laravel-media/packaging), [Queues, progress and errors](https://foxws.nl/laravel-media/queues), [Testing](https://foxws.nl/laravel-media/testing), [Configuration](https://foxws.nl/laravel-media/configuration), [Extending](https://foxws.nl/laravel-media/extending).
 
 ## Requirements
 
@@ -41,7 +41,7 @@ Check that ffmpeg and ffprobe are found:
 php artisan media:info
 ```
 
-See [Installation](docs/installation.md) for the scheduled commands and queue setup.
+See [Installation](https://foxws.nl/laravel-media/installation) for the scheduled commands and queue setup.
 
 ## Quick start
 
@@ -88,7 +88,7 @@ Route::middleware('auth')->group(fn () => Route::mediaStream('videos/{video}', '
 MediaStream::url('videos', ['video' => $video]);
 ```
 
-See [Streaming](docs/streaming.md) for subtitles, thumbnails, encryption and the segment cache.
+See [Streaming](https://foxws.nl/laravel-media/streaming) for subtitles, thumbnails, encryption and the segment cache.
 
 ## Testing
 
