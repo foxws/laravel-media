@@ -65,6 +65,17 @@ Then run it with `Foxws\Media\Process\Runner`:
 $result = app(Runner::class)->run(EncoderExecutable::Encoder, ['--input', $path], environment: ['ENCODER_LOG' => '1']);
 ```
 
+`onOutput` receives the standard output and `onErrorOutput` the error output as they stream in, for example to parse progress; throw `ProcessCancelledException` from either to stop the run. Successful runs that wrote to the error output are logged as warnings. Pass `logWarnings: false` for programs that report their progress or results there:
+
+```php
+app(Runner::class)->run(
+    EncoderExecutable::Encoder,
+    ['--input', $path],
+    onErrorOutput: fn (string $chunk) => $parser->feed($chunk),
+    logWarnings: false,
+);
+```
+
 In tests, `$fake->respondUsing(EncoderExecutable::Encoder, fn (array $arguments) => 'output')` fakes its output, and the assertions accept any `Binary`.
 
 ## Packager drivers
