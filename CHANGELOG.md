@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.3 - 2026-10-06
+
+<!-- Release notes generated using configuration in .github/release.yml at 17d697dabfd366f9f62e374149f4a07e26fde404 -->
+### What's Changed
+
+#### Other Changes
+
+* Stream error output and skip warnings per run by @francoism90 in https://github.com/foxws/laravel-media/pull/52
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.2...0.3.3
+
 ## 0.3.2 - 2026-10-06
 
 <!-- Release notes generated using configuration in .github/release.yml at 611ccc1504ac3224e8f215b0e3eb4f01a8d443dd -->
