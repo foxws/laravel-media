@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.2 - 2026-10-06
+
+<!-- Release notes generated using configuration in .github/release.yml at 611ccc1504ac3224e8f215b0e3eb4f01a8d443dd -->
+### What's Changed
+
+#### Other Changes
+
+* Decode on the CPU when the GPU can't decode the source by @francoism90 in https://github.com/foxws/laravel-media/pull/51
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.1...0.3.2
+
 ## 0.3.1 - 2026-10-05
 
 <!-- Release notes generated using configuration in .github/release.yml at 0319eca463f61e27745fc62d2e1b85424ebcbae7 -->
