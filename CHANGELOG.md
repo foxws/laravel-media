@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.6 - 2026-10-07
+
+<!-- Release notes generated using configuration in .github/release.yml at ea1fec99988bd3c04d1a07c1e38a794f437d99c4 -->
+### What's Changed
+
+#### Other Changes
+
+* Encode ffmpeg builder output on the GPU with hardware() by @francoism90 in https://github.com/foxws/laravel-media/pull/57
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.5...0.3.6
+
 ## 0.3.5 - 2026-10-07
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
