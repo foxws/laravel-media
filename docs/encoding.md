@@ -46,6 +46,24 @@ Format::h264()->withoutAudio();                             // also withoutVideo
 
 Invalid combinations, like two passes without a bitrate, throw `InvalidFormatException` before ffmpeg runs. `withArguments([...])` appends raw output options.
 
+### On the GPU
+
+`hardware()` encodes the video on the GPU, with `h264_vaapi`, `hevc_nvenc`, `av1_qsv` and so on for the format's codec. It takes `HardwareAcceleration::Vaapi`, `Nvenc` or `Qsv`, or `MEDIA_LADDER_HARDWARE` without one:
+
+```php
+use Foxws\Media\Encoding\HardwareAcceleration;
+
+$media->ffmpeg()
+    ->hardware(HardwareAcceleration::Vaapi)
+    ->addFilter(Scale::to(1280))
+    ->inFormat(Format::h264(crf: 22))
+    ->save('encoded.mp4');
+```
+
+- Decoding and filters stay on the CPU, so every source, filter, watermark and reel works. The frames are uploaded to the GPU at the end of the video chain.
+- The CRF becomes constant QP with VAAPI, CQ with NVENC and global quality with Quick Sync, unless a bitrate is set. The preset is left to the encoder.
+- When the GPU can't be opened, the video is encoded on the CPU with the format as it is. Formats that copy or leave out the video never use it, and two passes can't be combined with it.
+
 ## Filters
 
 Filters are value objects in `Foxws\Media\Filters`. Video and audio filters go into their own chain, in the order they're added:
@@ -157,7 +175,7 @@ $media->ffmpeg()
     ->save('reels/1.mp4');
 ```
 
-- `clips()` re-encodes, with frame-accurate cuts, and can take clips from any opened file.
+- `clips()` re-encodes, with frame-accurate cuts, and can take clips from any opened file. Add `hardware()` to encode the reel [on the GPU](#on-the-gpu).
 - `concat()` joins whole files without re-encoding when they share codecs and dimensions.
 - `Scene::toArray()` and `Scene::fromArray()` store scenes in a JSON column, since detection decodes the whole video.
 

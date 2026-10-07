@@ -22,6 +22,11 @@ class InvalidFormatException extends InvalidArgumentException
         return new self('Two-pass encoding writes a single output, so it can\'t be combined with addOutput().');
     }
 
+    public static function twoPassOnHardware(): self
+    {
+        return new self('Two-pass encoding runs on the CPU, so it can\'t be combined with hardware().');
+    }
+
     public static function twoPassWithoutBitrate(): self
     {
         return new self('Two-pass encoding needs a target bitrate. Call bitrate() on the format.');
