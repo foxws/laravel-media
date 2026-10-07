@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.5 - 2026-10-07
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Encrypt AV1 in fragmented MP4 per tile by @francoism90 in https://github.com/foxws/laravel-media/pull/56
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.4...0.3.5
+
 ## 0.3.4 - 2026-10-06
 
 <!-- Release notes generated using configuration in .github/release.yml at 44acfd7787eab5a6a1b69a4388f31df1c79578d2 -->
