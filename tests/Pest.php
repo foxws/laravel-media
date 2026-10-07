@@ -205,14 +205,16 @@ function mp4Box(string $type, string $payload = ''): string
  * A fragmented MP4 track with one fragment of the samples, as its initialization and media segment.
  *
  * @param  list<string>  $samples
+ * @param  string  $configObus  The OBUs of the av1C box of an av01 track.
  * @return array{init: string, media: string}
  */
-function fragmentedTrack(string $sampleEntry, array $samples): array
+function fragmentedTrack(string $sampleEntry, array $samples, string $configObus = ''): array
 {
-    $video = in_array($sampleEntry, ['avc1', 'hvc1', 'av01'], true);
+    $video = in_array($sampleEntry, ['avc1', 'hvc1', 'av01', 'vp09'], true);
     $config = match ($sampleEntry) {
         'avc1' => mp4Box('avcC', "\x01\x64\x00\x1f\xff"),
         'hvc1' => mp4Box('hvcC', "\x01".str_repeat("\0", 20)."\x0f"),
+        'av01' => mp4Box('av1C', "\x81\x08\x0c\x00".$configObus),
         default => mp4Box('esds', "\0\0\0\0"),
     };
 
@@ -315,4 +317,86 @@ function decryptCenc(string $segment, EncryptionKey $key): array
     }
 
     return $result;
+}
+
+/**
+ * Bits written most significant first, as [value, bit count] pairs, zero-padded to whole bytes.
+ *
+ * @param  list<array{int, int}>  $fields
+ */
+function av1Bits(array $fields): string
+{
+    $bits = implode('', array_map(fn (array $field): string => $field[1] > 0 ? str_pad(decbin($field[0]), $field[1], '0', STR_PAD_LEFT) : '', $fields));
+    $bits = str_pad($bits, (int) ceil(strlen($bits) / 8) * 8, '0');
+
+    return implode('', array_map(fn (string $byte): string => chr(bindec($byte)), str_split($bits, 8) ?: []));
+}
+
+function av1Obu(int $type, string $payload): string
+{
+    $size = '';
+
+    for ($length = strlen($payload); $length >= 0x80; $length >>= 7) {
+        $size .= chr(($length & 0x7F) | 0x80);
+    }
+
+    return chr(($type << 3) | 0x2).$size.chr($length).$payload;
+}
+
+/**
+ * A sequence header for 1920x1080 8-bit 4:2:0 video with order hints, CDEF and loop restoration.
+ */
+function av1SequenceHeader(): string
+{
+    return av1Obu(1, av1Bits([
+        [0, 3], [0, 1], [0, 1],              // profile, still picture, reduced still picture header
+        [0, 1], [0, 1], [0, 5],              // timing info, initial display delay, one operating point
+        [0, 12], [8, 5], [0, 1],             // operating point idc, level, tier
+        [10, 4], [10, 4], [1919, 11], [1079, 11],
+        [0, 1], [0, 1], [1, 1], [1, 1],      // frame ids, 128x128 superblocks, filter intra, intra edge
+        [1, 1], [1, 1], [1, 1], [1, 1],      // interintra, masked compound, warped motion, dual filter
+        [1, 1], [1, 1], [1, 1],              // order hints, jnt comp, ref frame mvs
+        [1, 1], [1, 1], [6, 3],              // screen content tools and integer mv selected per frame, 7 order hint bits
+        [0, 1], [1, 1], [1, 1],              // superres, cdef, restoration
+        [0, 1], [0, 1], [0, 1], [0, 1], [0, 2], [0, 1], // 8-bit, colour, no description, limited range, chroma position, uv delta q
+        [0, 1],                              // film grain
+    ]));
+}
+
+/**
+ * The quantization, segmentation, loop filter, CDEF, restoration and transform fields of a frame header.
+ *
+ * @return list<array{int, int}>
+ */
+function av1FrameTools(bool $intra): array
+{
+    return [
+        [100, 8], [0, 1], [0, 1], [0, 1], [0, 1], // base q index, no deltas, no quantizer matrix
+        [0, 1], [0, 1],                             // segmentation, delta q
+        [10, 6], [10, 6], [5, 6], [5, 6], [0, 3],   // loop filter levels and sharpness
+        [1, 1], [1, 1], ...array_fill(0, 10, [0, 1]), // loop filter deltas, none updated
+        [0, 2], [0, 2], [0, 12],                    // cdef
+        [1, 2], [0, 2], [0, 2], [0, 1],             // restoration for luma
+        [1, 1],                                     // tx mode select
+        ...($intra ? [] : [[0, 1], [0, 1]]),        // reference select, warped motion
+        [0, 1],                                     // reduced tx set
+        ...($intra ? [] : array_fill(0, 7, [0, 1])), // no global motion
+    ];
+}
+
+/**
+ * The header of a shown key frame, at the sequence's size (two tile columns) or at 640x360 (one tile).
+ *
+ * @return list<array{int, int}>
+ */
+function av1KeyFrameHeader(bool $small = false): array
+{
+    return [
+        [0, 1], [0, 2], [1, 1], [0, 1], [0, 1],   // not an existing frame, key frame, shown, cdf updates, no screen content
+        [$small ? 1 : 0, 1], [0, 7],              // frame size override, order hint
+        ...($small ? [[639, 11], [359, 11]] : []),
+        [0, 1], [0, 1],                           // render size, frame end cdf update
+        ...($small ? [[1, 1], [0, 1], [0, 1]] : [[1, 1], [1, 1], [0, 1], [0, 1], [0, 1], [1, 2]]), // uniform tiles, 1 or 2 columns, 2-byte tile sizes
+        ...av1FrameTools(true),
+    ];
 }
