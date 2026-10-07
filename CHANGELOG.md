@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.7 - 2026-10-07
+
+<!-- Release notes generated using configuration in .github/release.yml at 1b4ac5af69dfc94586514b5d0425ac0937e578fe -->
+### What's Changed
+
+#### Other Changes
+
+* Trust a CA file or skip TLS verification for remote inputs by @francoism90 in https://github.com/foxws/laravel-media/pull/58
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.6...0.3.7
+
 ## 0.3.6 - 2026-10-07
 
 <!-- Release notes generated using configuration in .github/release.yml at ea1fec99988bd3c04d1a07c1e38a794f437d99c4 -->
