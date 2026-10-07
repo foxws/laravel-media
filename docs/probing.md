@@ -20,6 +20,8 @@ Media::open('videos/clip.mp4');   // the disk in media.disk, or the app's defaul
 
 On disks that provide temporary URLs, such as S3, ffprobe and ffmpeg read the file through a short-lived signed URL instead of downloading it first. ffprobe then only fetches the parts it needs. Set `MEDIA_REMOTE_INPUTS=false` to download to the temporary directory instead.
 
+FFmpeg 9 verifies the TLS certificate of HTTPS URLs by default. When your storage uses a certificate from a private CA, set `MEDIA_REMOTE_INPUTS_CA_FILE` to that CA's certificate. Set `MEDIA_REMOTE_INPUTS_VERIFY_TLS=false` to accept any certificate, for example a self-signed one in development.
+
 ## Probing
 
 `probe()` runs ffprobe once and returns typed results:

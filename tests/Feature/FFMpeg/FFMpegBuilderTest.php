@@ -406,6 +406,42 @@ it('writes the concat list with escaped paths when saving and removes it afterwa
     Storage::disk('videos')->assertExists('joined.mp4');
 });
 
+it('passes the tls options of remote inputs to ffmpeg and the concat list', function () {
+    config(['media.remote_inputs.verify_tls' => false]);
+    fakeExecutable(Executable::FFProbe);
+    fakeExecutable(Executable::FFMpeg);
+    $remote = remoteDisk(Storage::fake('remote-root')->path(''));
+    $commands = [];
+    $lists = [];
+    Process::fake(['*' => function (PendingProcess $process) use (&$commands, &$lists) {
+        $commands[] = $process->command;
+
+        if (runs($process, Executable::FFProbe)) {
+            return Process::result(output: (string) json_encode(videoProbe()));
+        }
+
+        if (in_array('concat', $process->command, true)) {
+            $list = $process->command[array_search('-i', $process->command, true) + 1];
+            $lists[] = file_get_contents($list);
+        }
+
+        file_put_contents(end($process->command), 'output');
+
+        return Process::result();
+    }]);
+
+    Media::fromDisk($remote)->open('a.mp4')->ffmpeg()->save('copy.mp4');
+    Media::fromDisk($remote)->open(['a.mp4', 'b.mp4'])->ffmpeg()->concat()->save('joined.mp4');
+
+    expect($commands[0])->toContain('-tls_verify')
+        ->and(array_slice($commands[0], array_search('-tls_verify', $commands[0], true), 4))
+        ->toBe(['-tls_verify', '0', '-i', 'https://remote.test/a.mp4?signature=abc'])
+        ->and($lists)->toBe([
+            "file 'https://remote.test/a.mp4?signature=abc'\noption tls_verify 0\n"
+            ."file 'https://remote.test/b.mp4?signature=abc'\noption tls_verify 0\n",
+        ]);
+});
+
 it('refuses to concatenate files that differ without re-encoding', function () {
     fakeProbes(['a.mp4' => videoProbe(1920, 1080), 'b.mp4' => videoProbe(1280, 720)]);
     Storage::fake('videos');

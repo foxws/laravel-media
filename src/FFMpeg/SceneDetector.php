@@ -35,6 +35,7 @@ class SceneDetector
             '-hide_banner',
             '-nostdin',
             '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
+            ...$media->inputArguments(),
             '-i', $media->inputPath(),
             '-map', '0:v:0',
             '-vf', "scale=320:-2,select='gt(scene,".Number::format($threshold).")',metadata=print:file=-",

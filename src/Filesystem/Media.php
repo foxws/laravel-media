@@ -77,10 +77,7 @@ class Media
      */
     public function inputPath(): string
     {
-        if (! $this->disk->isLocal()
-            && Config::boolean('media.remote_inputs.enabled', true)
-            && $this->disk->providesTemporaryUrls()
-        ) {
+        if ($this->readsFromUrl()) {
             return $this->disk->temporaryUrl(
                 $this->path,
                 now()->addSeconds(Config::integer('media.remote_inputs.url_lifetime', 3600)),
@@ -88,6 +85,52 @@ class Media
         }
 
         return $this->localPath();
+    }
+
+    /**
+     * The protocol options for reading inputPath() over HTTPS: trusting a CA
+     * file, or skipping certificate verification, for storage behind a
+     * private or self-signed certificate. Empty for other inputs, as ffmpeg
+     * rejects these options for local files.
+     *
+     * @return array<string, string>
+     */
+    public function inputOptions(): array
+    {
+        if (! $this->readsFromUrl() || ! str_starts_with($this->inputPath(), 'https://')) {
+            return [];
+        }
+
+        if (! Config::boolean('media.remote_inputs.verify_tls', true)) {
+            return ['tls_verify' => '0'];
+        }
+
+        $caFile = Config::get('media.remote_inputs.ca_file');
+
+        return is_string($caFile) && $caFile !== '' ? ['ca_file' => $caFile] : [];
+    }
+
+    /**
+     * The input options as ffmpeg and ffprobe arguments, to put before the input.
+     *
+     * @return list<string>
+     */
+    public function inputArguments(): array
+    {
+        $arguments = [];
+
+        foreach ($this->inputOptions() as $option => $value) {
+            array_push($arguments, "-{$option}", $value);
+        }
+
+        return $arguments;
+    }
+
+    protected function readsFromUrl(): bool
+    {
+        return ! $this->disk->isLocal()
+            && Config::boolean('media.remote_inputs.enabled', true)
+            && $this->disk->providesTemporaryUrls();
     }
 
     /**

@@ -26,6 +26,37 @@ it('reads remote media through a temporary url instead of downloading it', funct
     expect($media->inputPath())->toBe('https://remote.test/video.mp4?signature=abc');
 });
 
+it('passes no tls options for remote media by default', function () {
+    $media = new Media(Disk::make(remoteDisk(Storage::fake('remote-root')->path(''))), 'video.mp4', app(TemporaryDirectories::class));
+
+    expect($media->inputOptions())->toBe([])
+        ->and($media->inputArguments())->toBe([]);
+});
+
+it('skips tls verification of remote media when disabled', function () {
+    config(['media.remote_inputs.verify_tls' => false, 'media.remote_inputs.ca_file' => '/certs/ca.pem']);
+    $media = new Media(Disk::make(remoteDisk(Storage::fake('remote-root')->path(''))), 'video.mp4', app(TemporaryDirectories::class));
+
+    expect($media->inputOptions())->toBe(['tls_verify' => '0'])
+        ->and($media->inputArguments())->toBe(['-tls_verify', '0']);
+});
+
+it('trusts a ca file for remote media', function () {
+    config(['media.remote_inputs.ca_file' => '/certs/ca.pem']);
+    $media = new Media(Disk::make(remoteDisk(Storage::fake('remote-root')->path(''))), 'video.mp4', app(TemporaryDirectories::class));
+
+    expect($media->inputArguments())->toBe(['-ca_file', '/certs/ca.pem']);
+});
+
+it('passes no tls options for media read from a local path', function (bool $remote) {
+    config(['media.remote_inputs.enabled' => false, 'media.remote_inputs.verify_tls' => false]);
+    $root = Storage::fake('remote-root')->path('');
+    file_put_contents("{$root}/video.mp4", 'video');
+    $disk = $remote ? remoteDisk($root) : Storage::disk('remote-root');
+
+    expect((new Media(Disk::make($disk), 'video.mp4', app(TemporaryDirectories::class)))->inputArguments())->toBe([]);
+})->with(['local disk' => false, 'downloaded remote disk' => true]);
+
 it('downloads remote media to a temporary directory when remote inputs are disabled', function () {
     config(['media.remote_inputs.enabled' => false]);
     $root = Storage::fake('remote-root')->path('');

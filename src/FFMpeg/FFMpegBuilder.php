@@ -333,7 +333,7 @@ class FFMpegBuilder
             $this->reel !== null => $this->reel->inputs(),
             $this->concat => [...$this->inputArguments, ...$this->concatInput()],
             default => array_merge(...array_map(
-                fn (Media $media): array => [...$this->inputArguments, '-i', $media->inputPath()],
+                fn (Media $media): array => [...$this->inputArguments, ...$media->inputArguments(), '-i', $media->inputPath()],
                 $this->opener->media(),
             )),
         };
@@ -353,7 +353,7 @@ class FFMpegBuilder
             '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
             ...$hardware->uploadArguments(),
             ...$inputs,
-            ...($this->watermark !== null ? ['-i', $this->watermark->inputPath()] : []),
+            ...($this->watermark !== null ? [...$this->watermark->inputArguments(), '-i', $this->watermark->inputPath()] : []),
             ...($output !== null ? [
                 ...$this->filterArguments($hardware->upload()),
                 ...($format?->forHardware($hardware)->toArguments() ?? []),
@@ -534,6 +534,8 @@ class FFMpegBuilder
 
     /**
      * Write the concat demuxer's list of opened files, outside the output directory.
+     * The demuxer doesn't pass its own input options on, so each file gets them
+     * as option directives.
      *
      * @throws TemporaryFileException
      */
@@ -541,10 +543,15 @@ class FFMpegBuilder
     {
         $this->concatDirectory = $this->directories->createCache();
 
-        $this->concatDirectory->put('concat.txt', implode('', array_map(
-            fn (Media $media): string => "file '".str_replace("'", "'\\''", $media->inputPath())."'\n",
-            $this->opener->media(),
-        )));
+        $this->concatDirectory->put('concat.txt', implode('', array_map(function (Media $media): string {
+            $entry = "file '".str_replace("'", "'\\''", $media->inputPath())."'\n";
+
+            foreach ($media->inputOptions() as $option => $value) {
+                $entry .= "option {$option} {$value}\n";
+            }
+
+            return $entry;
+        }, $this->opener->media())));
     }
 
     /**

@@ -23,6 +23,7 @@ class Prober
             '-show_format',
             '-show_streams',
             '-show_chapters',
+            ...$media->inputArguments(),
             $media->inputPath(),
         ]);
 

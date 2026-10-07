@@ -39,11 +39,16 @@ final readonly class Reel
      */
     public function inputs(): array
     {
-        return array_merge(...array_map(fn (Clip $clip): array => [
-            '-ss', Number::format($clip->from),
-            '-t', Number::format($clip->duration()),
-            '-i', $this->opener->mediaFor($clip->path)->inputPath(),
-        ], $this->clips));
+        return array_merge(...array_map(function (Clip $clip): array {
+            $media = $this->opener->mediaFor($clip->path);
+
+            return [
+                '-ss', Number::format($clip->from),
+                '-t', Number::format($clip->duration()),
+                ...$media->inputArguments(),
+                '-i', $media->inputPath(),
+            ];
+        }, $this->clips));
     }
 
     /**
