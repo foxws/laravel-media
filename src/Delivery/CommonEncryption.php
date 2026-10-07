@@ -13,7 +13,8 @@ use InvalidArgumentException;
  * Common Encryption with the cenc scheme (AES-128-CTR) for fragmented MP4 segments, applied as they're
  * served, so the cached segments stay unencrypted. Audio samples are encrypted whole. H.264 and HEVC
  * samples are encrypted per NAL unit (subsample encryption): lengths, NAL headers and non-video NAL
- * units stay readable, and each protected range is a whole number of AES blocks.
+ * units stay readable. AV1 samples are encrypted per tile: OBU headers, sequence and frame headers
+ * and tile sizes stay readable. Each protected range is a whole number of AES blocks.
  *
  * @internal
  */
@@ -120,7 +121,7 @@ final class CommonEncryption
      * Encrypt the samples one movie fragment points at, and return the fragment with the encryption
      * boxes added to each track fragment.
      *
-     * @param  array{nalHeaderSize: int|null, nalLengthSize: int, defaultSampleSize: int}  $track
+     * @param  array{nalHeaderSize: int|null, nalLengthSize: int, defaultSampleSize: int, av1: Av1Bitstream|null}  $track
      * @param  array<int, string>  $samples  Receives the encrypted samples by their position in the segment.
      *
      * @throws InvalidMediaException
@@ -129,7 +130,7 @@ final class CommonEncryption
     {
         $moof = substr($segment, $start, $size);
         $children = self::boxes($moof, 8);
-        $subsampled = $track['nalHeaderSize'] !== null;
+        $subsampled = $track['nalHeaderSize'] !== null || $track['av1'] !== null;
         $information = [];
 
         foreach ($children as $child) {
@@ -147,7 +148,7 @@ final class CommonEncryption
                 }
 
                 $iv = substr(hash('xxh128', "{$context}|{$sample}", true), 0, self::IV_SIZE);
-                [$samples[$position], $subsamples] = self::protectSample(substr($segment, $position, $length), $key, $iv, $track['nalHeaderSize'], $track['nalLengthSize']);
+                [$samples[$position], $subsamples] = self::protectSample(substr($segment, $position, $length), $key, $iv, $track);
                 $entries[] = ['iv' => $iv, 'subsamples' => $subsamples];
                 $sample++;
             }
@@ -194,7 +195,7 @@ final class CommonEncryption
         $sizes = array_map(strlen(...), $information);
 
         if (max([0, ...$sizes]) > 0xFF) {
-            throw InvalidMediaException::notEncryptable('samples with this many NAL units');
+            throw InvalidMediaException::notEncryptable('samples with this many NAL units or tiles');
         }
 
         $default = count(array_unique($sizes)) === 1 ? $sizes[0] : 0;
@@ -277,35 +278,22 @@ final class CommonEncryption
     }
 
     /**
-     * Encrypt a sample whole, or the slice data of its video NAL units, as one AES-CTR stream.
+     * Encrypt a sample whole, or the slice data of its video NAL units or the data of its AV1 tiles,
+     * as one AES-CTR stream.
      *
+     * @param  array{nalHeaderSize: int|null, nalLengthSize: int, defaultSampleSize: int, av1: Av1Bitstream|null}  $track
      * @return array{string, list<array{int, int}>} The encrypted sample and its subsamples as clear and protected byte counts.
+     *
+     * @throws InvalidMediaException
      */
-    protected static function protectSample(string $sample, string $key, string $iv, ?int $nalHeaderSize, int $nalLengthSize): array
+    protected static function protectSample(string $sample, string $key, string $iv, array $track): array
     {
-        if ($nalHeaderSize === null) {
+        if ($track['av1'] !== null) {
+            $ranges = self::tileRanges($track['av1'], $sample);
+        } elseif ($track['nalHeaderSize'] !== null) {
+            $ranges = self::nalRanges($sample, $track['nalHeaderSize'], $track['nalLengthSize']);
+        } else {
             return [self::encrypt($sample, $key, $iv), []];
-        }
-
-        $ranges = [];
-        $position = 0;
-        $length = strlen($sample);
-
-        while ($position + $nalLengthSize <= $length) {
-            $nalSize = (int) hexdec(bin2hex(substr($sample, $position, $nalLengthSize)));
-            $unitSize = min($nalLengthSize + $nalSize, $length - $position);
-            $protected = 0;
-
-            if ($nalSize > $nalHeaderSize && self::isSliceData($sample[$position + $nalLengthSize] ?? "\0", $nalHeaderSize)) {
-                $protected = intdiv($unitSize - $nalLengthSize - $nalHeaderSize, 16) * 16;
-            }
-
-            $ranges[] = [$unitSize - $protected, $protected];
-            $position += $unitSize;
-        }
-
-        if ($position < $length) {
-            $ranges[] = [$length - $position, 0];
         }
 
         $subsamples = self::subsamples($ranges);
@@ -329,6 +317,63 @@ final class CommonEncryption
         }
 
         return [$output, $subsamples];
+    }
+
+    /**
+     * The clear and protected byte counts of a sample whose video NAL units have their slice data protected.
+     *
+     * @return list<array{int, int}>
+     */
+    protected static function nalRanges(string $sample, int $nalHeaderSize, int $nalLengthSize): array
+    {
+        $ranges = [];
+        $position = 0;
+        $length = strlen($sample);
+
+        while ($position + $nalLengthSize <= $length) {
+            $nalSize = (int) hexdec(bin2hex(substr($sample, $position, $nalLengthSize)));
+            $unitSize = min($nalLengthSize + $nalSize, $length - $position);
+            $protected = 0;
+
+            if ($nalSize > $nalHeaderSize && self::isSliceData($sample[$position + $nalLengthSize] ?? "\0", $nalHeaderSize)) {
+                $protected = intdiv($unitSize - $nalLengthSize - $nalHeaderSize, 16) * 16;
+            }
+
+            $ranges[] = [$unitSize - $protected, $protected];
+            $position += $unitSize;
+        }
+
+        if ($position < $length) {
+            $ranges[] = [$length - $position, 0];
+        }
+
+        return $ranges;
+    }
+
+    /**
+     * The clear and protected byte counts of an AV1 sample: the whole blocks at the end of each tile
+     * are protected, and everything else, from OBU headers to tile sizes, stays clear.
+     *
+     * @return list<array{int, int}>
+     *
+     * @throws InvalidMediaException
+     */
+    protected static function tileRanges(Av1Bitstream $bitstream, string $sample): array
+    {
+        $ranges = [];
+        $position = 0;
+
+        foreach ($bitstream->tiles($sample) as [$offset, $size]) {
+            $protected = intdiv($size, 16) * 16;
+            $ranges[] = [$offset + $size - $protected - $position, $protected];
+            $position = $offset + $size;
+        }
+
+        if ($position < strlen($sample)) {
+            $ranges[] = [strlen($sample) - $position, 0];
+        }
+
+        return $ranges;
     }
 
     /**
@@ -397,7 +442,7 @@ final class CommonEncryption
      */
     protected static function protectSampleEntry(string $entry, string $type, EncryptionKey $key): string
     {
-        $protected = self::nalHeaderSize($type) !== null ? 'encv' : 'enca';
+        $protected = self::nalHeaderSize($type) !== null || $type === 'av01' ? 'encv' : 'enca';
 
         $tenc = self::fullBox('tenc', 0, 0, "\0\0\1".chr(self::IV_SIZE).hex2bin($key->keyId));
         $sinf = self::box('sinf', self::box('frma', $type).self::fullBox('schm', 0, 0, 'cenc'.pack('N', 0x00010000)).self::box('schi', $tenc));
@@ -413,7 +458,7 @@ final class CommonEncryption
     /**
      * What encrypting the track's samples needs from its initialization segment.
      *
-     * @return array{nalHeaderSize: int|null, nalLengthSize: int, defaultSampleSize: int}
+     * @return array{nalHeaderSize: int|null, nalLengthSize: int, defaultSampleSize: int, av1: Av1Bitstream|null}
      *
      * @throws InvalidMediaException
      */
@@ -422,8 +467,13 @@ final class CommonEncryption
         ['type' => $type, 'entry' => $entry] = self::sampleEntry($init);
         $nalHeaderSize = self::nalHeaderSize($type);
         $nalLengthSize = 4;
+        $av1 = null;
 
-        if ($nalHeaderSize !== null) {
+        if ($type === 'av01') {
+            // The sequence header follows the four bytes of the configuration record.
+            $config = self::find($entry, ['av1C'], 86) ?? throw InvalidMediaException::notFragmented();
+            $av1 = new Av1Bitstream(substr($config, 12));
+        } elseif ($nalHeaderSize !== null) {
             // Video sample entries have 78 bytes of fields before their child boxes.
             $config = self::find($entry, [$nalHeaderSize === 1 ? 'avcC' : 'hvcC'], 86) ?? throw InvalidMediaException::notFragmented();
             $nalLengthSize = (ord($config[$nalHeaderSize === 1 ? 12 : 29] ?? "\3") & 0x3) + 1;
@@ -435,6 +485,7 @@ final class CommonEncryption
             'nalHeaderSize' => $nalHeaderSize,
             'nalLengthSize' => $nalLengthSize,
             'defaultSampleSize' => $trex !== null ? self::uint32($trex, 24) : 0,
+            'av1' => $av1,
         ];
     }
 
@@ -450,7 +501,7 @@ final class CommonEncryption
         $stsd = self::find($init, ['moov', 'trak', 'mdia', 'minf', 'stbl', 'stsd']) ?? throw InvalidMediaException::notFragmented();
         $entry = self::boxes($stsd, 16)[0] ?? throw InvalidMediaException::notFragmented();
 
-        if (! in_array($entry['type'], ['avc1', 'avc3', 'hvc1', 'hev1', 'mp4a', 'ac-3', 'ec-3', 'Opus', 'fLaC'], true)) {
+        if (! in_array($entry['type'], ['avc1', 'avc3', 'hvc1', 'hev1', 'av01', 'mp4a', 'ac-3', 'ec-3', 'Opus', 'fLaC'], true)) {
             throw InvalidMediaException::notEncryptable($entry['type']);
         }
 

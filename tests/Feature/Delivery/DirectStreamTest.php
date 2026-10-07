@@ -602,11 +602,11 @@ it('serves encrypted fragments itself instead of redirecting to the cache disk',
 });
 
 it('refuses to encrypt codecs whose frame headers have to stay readable', function () {
-    Media::fake(['video.mp4' => FakeProbe::video(codec: 'av1', duration: 13)]);
+    Media::fake(['video.mp4' => FakeProbe::video(codec: 'vp9', duration: 13)]);
     $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEncryption(EncryptionKey::generate(), fn () => 'key');
 
-    expect(fn () => $stream->fragmented()->mediaPlaylist(0, fn () => 'segment', initUrl: fn () => 'init'))->toThrow(InvalidMediaException::class, '[av1] isn\'t supported')
-        ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidMediaException::class, '[av1] isn\'t supported');
+    expect(fn () => $stream->fragmented()->mediaPlaylist(0, fn () => 'segment', initUrl: fn () => 'init'))->toThrow(InvalidMediaException::class, '[vp9] isn\'t supported')
+        ->and(fn () => $stream->segmentResponse(0, 0, Track::Video))->toThrow(InvalidMediaException::class, '[vp9] isn\'t supported');
 });
 
 it('serves the key as a clearkey license', function () {

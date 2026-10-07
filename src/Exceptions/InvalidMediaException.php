@@ -36,7 +36,12 @@ class InvalidMediaException extends RuntimeException
 
     public static function notEncryptable(string $codec): self
     {
-        return new self("Fragmented MP4 segments can only be encrypted with H.264 or HEVC video and AAC, MP3, AC-3, Opus or FLAC audio: [{$codec}] isn't supported.");
+        return new self("Fragmented MP4 segments can only be encrypted with H.264, HEVC or AV1 video and AAC, MP3, AC-3, Opus or FLAC audio: [{$codec}] isn't supported.");
+    }
+
+    public static function unreadableBitstream(string $codec): self
+    {
+        return new self("The [{$codec}] bitstream of the segment couldn't be read to encrypt it.");
     }
 
     public static function notFragmented(): self

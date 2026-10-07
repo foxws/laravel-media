@@ -139,7 +139,7 @@ use Foxws\Media\Encryption\EncryptionKey;
 - **CMAF and DASH** use Common Encryption (`cenc`), played through ClearKey in browsers that support it (Chrome, Edge and Firefox). DASH players fetch the key as a license from `license.json`. Players POST to it, so register the routes where CSRF protection doesn't apply, such as `routes/api.php`, or exclude `*/license.json`.
 - **Keys:** `EncryptionKey::derive()` makes a key from a secret and a context, so it doesn't need storing.
 - **Rotating keys:** pass a callback and `rotateEvery`, e.g. `withEncryption(fn (int $period) => EncryptionKey::derive($secret, "video:{$id}:{$period}"), rotateEvery: 100)`. This is for MPEG-TS only, since fragmented MP4 takes one key.
-- **AV1 and VP9** can't be encrypted in fragmented MP4 yet.
+- **AV1** is encrypted per tile, leaving its OBU, sequence and frame headers readable as the AV1 ISOBMFF binding requires. **VP9** can't be encrypted in fragmented MP4 yet.
 
 ClearKey hands the key to the browser. It protects segments in transit and at rest, but not from the viewer.
 

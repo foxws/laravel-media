@@ -29,11 +29,11 @@ enum FragmentedMp4Codec: string
     }
 
     /**
-     * Whether segments with this codec can be encrypted as they're served. AV1 and VP9 need their
-     * frame headers left readable, which takes parsing them.
+     * Whether segments with this codec can be encrypted as they're served. VP9 needs its frame
+     * headers left readable, which takes parsing them.
      */
     public function isEncryptable(): bool
     {
-        return ! in_array($this, [self::Av1, self::Vp9], true);
+        return $this !== self::Vp9;
     }
 }

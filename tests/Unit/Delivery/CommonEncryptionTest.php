@@ -30,6 +30,7 @@ it('marks the track as encrypted with the cenc scheme and lists the key id', fun
         ->and(FragmentedMp4::split($init.$track['media'])['init'])->toBe($init);
 })->with([
     'video' => ['avc1', 'encv'],
+    'av1' => ['av01', 'encv'],
     'audio' => ['mp4a', 'enca'],
 ]);
 
@@ -114,11 +115,27 @@ it('derives the same ivs for the same context only', function () {
         ->and($encrypt('0|audio|2'))->not->toBe($encrypt('0|audio|1'));
 });
 
+it('leaves the obu headers, frame headers and tile sizes of av1 readable', function () {
+    $key = EncryptionKey::generate();
+    $header = av1Bits(av1KeyFrameHeader());
+    $sample = av1Obu(6, $header.av1Bits([[0, 1]]).pack('v', 39).str_repeat('a', 40).str_repeat('b', 23));
+    $track = fragmentedTrack('av01', [$sample], av1SequenceHeader());
+
+    $segment = CommonEncryption::segment($track['init'], $track['media'], $key, '0|video|0');
+    $decrypted = decryptCenc($segment, $key);
+
+    // Each tile protects its whole blocks at its end: 32 of 40 bytes, then 16 of 23.
+    expect($decrypted['samples'])->toBe([$sample])
+        ->and($decrypted['subsamples'])->toBe([[[2 + strlen($header) + 1 + 2 + 8, 32], [7, 16]]])
+        ->and($segment)->toContain(substr($sample, 0, 2 + strlen($header) + 1 + 2 + 8))
+        ->and($segment)->not->toContain(str_repeat('a', 9));
+});
+
 it('refuses codecs whose frame headers have to stay readable', function () {
-    $track = fragmentedTrack('av01', ['sample']);
+    $track = fragmentedTrack('vp09', ['sample']);
 
     CommonEncryption::init($track['init'], EncryptionKey::generate());
-})->throws(InvalidMediaException::class, "Fragmented MP4 segments can only be encrypted with H.264 or HEVC video and AAC, MP3, AC-3, Opus or FLAC audio: [av01] isn't supported.");
+})->throws(InvalidMediaException::class, "Fragmented MP4 segments can only be encrypted with H.264, HEVC or AV1 video and AAC, MP3, AC-3, Opus or FLAC audio: [vp09] isn't supported.");
 
 it('refuses segments that are not fragmented mp4', function (string $init, string $media) {
     CommonEncryption::segment($init, $media, EncryptionKey::generate(), '0|audio|0');

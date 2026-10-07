@@ -26,6 +26,6 @@ it('encrypts every codec but those whose frame headers have to stay readable', f
     'hevc' => [FragmentedMp4Codec::Hevc, true],
     'aac' => [FragmentedMp4Codec::Aac, true],
     'opus' => [FragmentedMp4Codec::Opus, true],
-    'av1' => [FragmentedMp4Codec::Av1, false],
+    'av1' => [FragmentedMp4Codec::Av1, true],
     'vp9' => [FragmentedMp4Codec::Vp9, false],
 ]);
