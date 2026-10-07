@@ -61,6 +61,8 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | --- | --- | --- | --- |
 | `remote_inputs.enabled` | `MEDIA_REMOTE_INPUTS` | `true` | Read disks with temporary URLs, like S3, through signed URLs instead of downloading |
 | `remote_inputs.url_lifetime` | `MEDIA_REMOTE_INPUTS_URL_LIFETIME` | `3600` | Lifetime of those URLs |
+| `remote_inputs.verify_tls` | `MEDIA_REMOTE_INPUTS_VERIFY_TLS` | `true` | `false` accepts any certificate on HTTPS URLs, e.g. a self-signed one in development |
+| `remote_inputs.ca_file` | `MEDIA_REMOTE_INPUTS_CA_FILE` | `null` | CA certificate to trust for HTTPS URLs, for storage behind a private CA |
 
 ## Temporary files
 

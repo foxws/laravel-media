@@ -46,6 +46,7 @@ class KeyframeIndexer
             '-select_streams', 'v:0',
             '-show_entries', 'packet=pts_time,flags',
             '-of', 'csv=print_section=0',
+            ...$media->inputArguments(),
             $media->inputPath(),
         ])->output;
     }

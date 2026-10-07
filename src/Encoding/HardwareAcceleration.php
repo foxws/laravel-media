@@ -127,6 +127,7 @@ enum HardwareAcceleration: string
                         '-loglevel', 'error',
                         '-xerror',
                         ...$this->inputArguments(),
+                        ...$media->inputArguments(),
                         '-i', $media->inputPath(),
                         '-map', '0:v:0',
                         '-frames:v', '1',
