@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Events\ExportCompleted;
 use Foxws\Media\Events\ExportFailed;
 use Foxws\Media\Events\ProgressReported;
@@ -24,6 +25,7 @@ use Foxws\Media\Filters\Tonemap;
 use Foxws\Media\Filters\ToneMapAlgorithm;
 use Foxws\Media\Filters\Volume;
 use Foxws\Media\Process\Progress;
+use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
@@ -584,3 +586,75 @@ it('cancels the export when a progress callback returns false', function () {
     Storage::disk('videos')->assertMissing('out.mp4');
     Event::assertDispatched(ExportFailed::class);
 });
+
+it('encodes on the gpu after decoding and filtering on the cpu', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->hardware(HardwareAcceleration::Vaapi)
+        ->addFilter(Scale::to(1280))
+        ->inFormat(Format::h264(crf: 22))
+        ->save('encoded.mp4');
+
+    $arguments = Media::commands(Executable::FFMpeg)[1];
+
+    expect(array_slice($arguments, 5, 3))->toBe(['-vaapi_device', '/dev/dri/renderD128', '-i'])
+        ->and($arguments)->toContain('-vf', 'scale=1280:-2,format=nv12,hwupload', 'h264_vaapi', '-qp', '22')
+        ->not->toContain('-hwaccel', 'libx264', '-crf', '-pix_fmt');
+});
+
+it('encodes on the configured gpu', function () {
+    config(['media.ladder.hardware' => 'qsv']);
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->hardware()->inFormat(Format::hevc())->save('encoded.mp4');
+
+    expect(Media::commands(Executable::FFMpeg)[1])->toContain('-filter_hw_device', 'format=nv12,hwupload=extra_hw_frames=64', 'hevc_qsv', '-global_quality');
+});
+
+it('encodes on the cpu when the gpu cannot be opened', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()])->failNext(Executable::FFMpeg, 'No VA display found');
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->hardware(HardwareAcceleration::Vaapi)->inFormat(Format::h264())->save('encoded.mp4');
+
+    expect(Media::commands(Executable::FFMpeg)[1])->toContain('libx264', '-crf', '-pix_fmt')
+        ->not->toContain('-vaapi_device', 'format=nv12,hwupload', 'h264_vaapi');
+});
+
+it('uploads watermarked video to the gpu after the overlay', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    $builder = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->hardware(HardwareAcceleration::Vaapi)
+        ->watermark('logo.png')
+        ->inFormat(Format::h264());
+
+    $arguments = $builder->arguments('out.mp4');
+
+    expect($arguments[array_search('-filter_complex', $arguments, true) + 1])->toEndWith(',format=nv12,hwupload[v]');
+});
+
+it('skips the gpu when the video is not encoded', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    $builder = Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->hardware(HardwareAcceleration::Vaapi);
+
+    expect($builder->inFormat(Format::copy('mp4'))->acceleration())->toBe(HardwareAcceleration::None)
+        ->and($builder->inFormat(Format::aac())->arguments('audio.m4a'))->not->toContain('-vaapi_device', '-vf');
+    Media::assertRanTimes(Executable::FFMpeg, 0);
+});
+
+it('does not encode two passes on the gpu', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->hardware(HardwareAcceleration::Nvenc)
+        ->inFormat(Format::h264()->bitrate(2000)->twoPass())
+        ->save('encoded.mp4');
+})->throws(InvalidFormatException::class, "can't be combined with hardware()");

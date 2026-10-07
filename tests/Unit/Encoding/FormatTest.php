@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\HardwareAcceleration;
 
 it('builds the ffmpeg output arguments for h264', function () {
     expect(Format::h264(crf: 20, preset: 'slow')->toArguments())->toBe([
@@ -69,4 +70,39 @@ it('returns changed copies and leaves the original format alone', function () {
         ->and($format->passes)->toBe(1)
         ->and($format->toArguments())->not->toContain('-g')
         ->not->toContain('-b:v');
+});
+
+it('encodes on a gpu with the codec\'s hardware encoder and the crf as its quality', function () {
+    expect(Format::h264(crf: 20, preset: 'slow')->forHardware(HardwareAcceleration::Vaapi)->toArguments())->toBe([
+        '-c:a', 'aac',
+        '-c:v', 'h264_vaapi', '-rc_mode', 'CQP', '-qp', '20',
+        '-movflags', '+faststart',
+        '-f', 'mp4',
+    ])
+        ->and(Format::hevc()->forHardware(HardwareAcceleration::Nvenc)->toArguments())
+        ->toContain('hevc_nvenc', '-cq', '28', '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1');
+});
+
+it('keeps a bitrate on a gpu instead of constant quality', function () {
+    $arguments = Format::av1()->bitrate(3000)->forHardware(HardwareAcceleration::Qsv)->toArguments();
+
+    expect($arguments)->toContain('av1_qsv', '-b:v', '3000k')
+        ->not->toContain('-global_quality', '-crf', '-preset');
+});
+
+it('leaves formats alone that do not encode video', function (Format $format) {
+    expect($format->encodesVideo())->toBeFalse()
+        ->and($format->forHardware(HardwareAcceleration::Vaapi))->toBe($format);
+})->with([
+    'copy' => [Format::copy('mp4')],
+    'audio' => [Format::aac()],
+    'image' => [Format::jpeg()],
+    'without video' => [Format::h264()->withoutVideo()],
+]);
+
+it('keeps the cpu encoder without hardware', function () {
+    $format = Format::h264();
+
+    expect($format->encodesVideo())->toBeTrue()
+        ->and($format->forHardware(HardwareAcceleration::None))->toBe($format);
 });

@@ -3,13 +3,16 @@
 declare(strict_types=1);
 
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Exceptions\InvalidFilterException;
 use Foxws\Media\Exceptions\InvalidMediaException;
+use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\FFMpeg\Clip;
 use Foxws\Media\Filters\Fade;
 use Foxws\Media\Filters\Loudnorm;
 use Foxws\Media\Filters\Tonemap;
+use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Support\Facades\Storage;
 
 it('joins clips of one file with accurate seeks on separate inputs', function () {
@@ -108,4 +111,23 @@ it('tone maps only the clips that come from hdr files', function () {
 
     expect($graph)->toContain('[0:v:0]setpts=PTS-STARTPTS,'.new Tonemap.',scale=1920:1080')
         ->toContain('[1:v:0]setpts=PTS-STARTPTS,scale=1920:1080');
+});
+
+it('encodes a reel on the gpu, uploading the joined and filtered video', function () {
+    Media::fake(['video.mp4' => FakeProbe::video()]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->clips([Clip::make(0, 2), Clip::make(5, 7)], width: 1080, height: 1920, fps: 30)
+        ->addFilter(Fade::out(0.5, start: 3.5))
+        ->hardware(HardwareAcceleration::Vaapi)
+        ->inFormat(Format::h264())
+        ->save('reel.mp4');
+
+    $arguments = Media::commands(Executable::FFMpeg)[1];
+
+    expect(array_slice($arguments, 5, 4))->toBe(['-vaapi_device', '/dev/dri/renderD128', '-ss', '0'])
+        ->and($arguments[array_search('-filter_complex', $arguments, true) + 1])->toContain('[joined]fade=t=out:st=3.5:d=0.5,format=nv12,hwupload[v]')
+        ->and($arguments)->toContain('h264_vaapi');
+    Media::assertSaved('reel.mp4', 'videos');
 });

@@ -8,6 +8,7 @@ use Foxws\Media\Concerns\HasContext;
 use Foxws\Media\Concerns\HasSaveCallbacks;
 use Foxws\Media\Concerns\ReportsProgress;
 use Foxws\Media\Encoding\Format;
+use Foxws\Media\Encoding\HardwareAcceleration;
 use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Events\ExportCompleted;
 use Foxws\Media\Events\ExportFailed;
@@ -72,6 +73,8 @@ class FFMpegBuilder
     protected ?Tonemap $toneMap = null;
 
     protected ?Reel $reel = null;
+
+    protected ?HardwareAcceleration $hardware = null;
 
     protected bool $concat = false;
 
@@ -208,6 +211,32 @@ class FFMpegBuilder
     }
 
     /**
+     * Encode the video on a GPU, media.ladder.hardware by default, with the matching encoder for the
+     * format's codec (H.264, HEVC or AV1). Decoding and filters stay on the CPU, so every source and
+     * filter works, and the frames are uploaded to the GPU at the end of the video chain. When the
+     * GPU can't be opened, or the format copies or leaves out the video, it's encoded on the CPU.
+     */
+    public function hardware(?HardwareAcceleration $hardware = null): static
+    {
+        $this->hardware = $hardware ?? HardwareAcceleration::configured();
+
+        return $this;
+    }
+
+    /**
+     * Where the video of the main output is encoded: the GPU of hardware() when it can be opened,
+     * otherwise the CPU.
+     */
+    public function acceleration(): HardwareAcceleration
+    {
+        if ($this->hardware === null || $this->format?->encodesVideo() !== true) {
+            return HardwareAcceleration::None;
+        }
+
+        return $this->hardware->orCpu();
+    }
+
+    /**
      * Join the opened files end to end without re-encoding. They must share codecs and
      * dimensions; use clips() to join files that differ. Streams are copied unless
      * another format is set.
@@ -310,6 +339,7 @@ class FFMpegBuilder
         };
 
         $format = $this->format ?? ($this->concat ? Format::copy() : null);
+        $hardware = $output !== null ? $this->acceleration() : HardwareAcceleration::None;
 
         $outputs = array_merge(...array_map(
             fn (Output $extra): array => $extra->toArguments($directory?->path($extra->path) ?? $extra->path),
@@ -321,11 +351,12 @@ class FFMpegBuilder
             '-hide_banner',
             '-nostdin',
             '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
+            ...$hardware->uploadArguments(),
             ...$inputs,
             ...($this->watermark !== null ? ['-i', $this->watermark->inputPath()] : []),
             ...($output !== null ? [
-                ...$this->filterArguments(),
-                ...($format?->toArguments() ?? []),
+                ...$this->filterArguments($hardware->upload()),
+                ...($format?->forHardware($hardware)->toArguments() ?? []),
                 ...$this->arguments,
                 ...$passArguments,
                 $output,
@@ -336,26 +367,28 @@ class FFMpegBuilder
 
     /**
      * The maps and filter arguments. Plain -vf/-af chains, or a complex graph
-     * with labelled outputs when a watermark adds a second video input.
+     * with labelled outputs when a watermark adds a second video input. The upload to the GPU goes
+     * last in the video chain.
      *
      * @return list<string>
      *
      * @throws InvalidFilterException
      */
-    protected function filterArguments(): array
+    protected function filterArguments(?Filter $upload = null): array
     {
         $reel = $this->reel;
+        $uploads = $upload !== null ? [$upload] : [];
 
         if ($reel !== null) {
             $this->ensureReelIsAlone();
 
-            return $reel->arguments($this->filters, $this->toneMap);
+            return $reel->arguments([...$this->filters, ...$uploads], $this->toneMap);
         }
 
         $filters = $this->sourceFilters();
 
         if ($this->watermark === null) {
-            return [...$this->maps, ...FilterChain::arguments($filters)];
+            return [...$this->maps, ...FilterChain::arguments([...$filters, ...$uploads])];
         }
 
         if ($this->maps !== []) {
@@ -372,10 +405,11 @@ class FFMpegBuilder
         $watermarkInput = $this->concat ? 1 : count($this->opener->media());
 
         $graph = sprintf(
-            '[0:v]%s[base];[%d:v]%s[v]',
+            '[0:v]%s[base];[%d:v]%s%s[v]',
             $video !== '' ? $video : 'null',
             $watermarkInput,
             $this->watermarkFilter,
+            $upload !== null ? ",{$upload}" : '',
         );
 
         if ($audio !== '') {
@@ -651,6 +685,10 @@ class FFMpegBuilder
 
         if ($this->outputs !== []) {
             throw InvalidFormatException::twoPassWithOutputs();
+        }
+
+        if ($this->hardware !== null && $this->hardware !== HardwareAcceleration::None) {
+            throw InvalidFormatException::twoPassOnHardware();
         }
 
         if ($this->format->withoutVideo || ! in_array($this->format->videoCodec, [VideoCodec::H264, VideoCodec::Vp9], true)) {

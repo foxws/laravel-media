@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Encoding;
 
+use InvalidArgumentException;
+
 /**
  * The output settings for an encode: container, codecs, rate control and stream selection.
  */
@@ -181,6 +183,49 @@ final readonly class Format
     public function withoutSubtitles(): self
     {
         return $this->with(['withoutSubtitles' => true]);
+    }
+
+    /**
+     * Whether the video is encoded, rather than copied or left out.
+     */
+    public function encodesVideo(): bool
+    {
+        return ! $this->withoutVideo && $this->videoCodec !== null && $this->videoCodec !== VideoCodec::Copy;
+    }
+
+    /**
+     * The format encoded on a GPU, with the codec's hardware encoder. The CRF becomes the encoder's
+     * constant quality unless a bitrate is set, and the preset is left to the encoder. A pixel format
+     * is replaced, as frames reach VAAPI and Quick Sync on the GPU, and NVENC takes 8-bit 4:2:0.
+     *
+     * @throws InvalidArgumentException
+     */
+    public function forHardware(HardwareAcceleration $hardware): self
+    {
+        $codec = $this->videoCodec;
+
+        if ($hardware === HardwareAcceleration::None || $codec === null || ! $this->encodesVideo()) {
+            return $this;
+        }
+
+        $arguments = $this->arguments;
+        $pixelFormat = array_search('-pix_fmt', $arguments, true);
+
+        if ($pixelFormat !== false) {
+            array_splice($arguments, $pixelFormat, 2);
+        }
+
+        return $this->with([
+            'videoCodec' => null,
+            'crf' => null,
+            'preset' => null,
+            'arguments' => [
+                '-c:v', $hardware->encoder($codec),
+                ...($this->crf !== null && $this->videoBitrate === null ? $hardware->quality($this->crf) : []),
+                ...($hardware === HardwareAcceleration::Nvenc ? ['-pix_fmt', PixelFormat::Yuv420p->value] : []),
+                ...$arguments,
+            ],
+        ]);
     }
 
     /**
