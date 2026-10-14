@@ -56,6 +56,16 @@ Both need files encoded for streaming: H.264 or HEVC with AAC, at a few sizes. A
 - Laravel 13
 - ffmpeg and ffprobe
 
+> [!TIP]
+> Let your AI agent do the hard parts. This package ships a [Laravel Boost](https://laravel.com/docs/boost) skill, `laravel-media-development`, that teaches your agent how to install, configure and use Laravel Media. Install Boost and select the skill when prompted:
+>
+> ```bash
+> composer require laravel/boost --dev
+> php artisan boost:install
+> ```
+>
+> Already using Boost? Run `php artisan boost:update --discover` to pick up the skill. Then just ask, for example: *"Transcode uploaded videos from S3 to 720p H.264 on a queue."*
+
 ## Pages
 
 - [Installation](installation.md)
