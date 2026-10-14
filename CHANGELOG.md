@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.8 - 2026-10-14
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Add Laravel Boost tip to README and docs by @francoism90 in https://github.com/foxws/laravel-media/pull/59
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.7...0.3.8
+
 ## 0.3.7 - 2026-10-07
 
 <!-- Release notes generated using configuration in .github/release.yml at 1b4ac5af69dfc94586514b5d0425ac0937e578fe -->
