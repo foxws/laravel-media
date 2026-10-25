@@ -2,6 +2,22 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.3.9 - 2026-10-25
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Bump shivammathur/setup-php from 2.37.2 to 2.40.0 by @dependabot[bot] in https://github.com/foxws/laravel-media/pull/60
+* Add a UHD ladder with 2160p and 1440p by @francoism90 in https://github.com/foxws/laravel-media/pull/61
+
+### New Contributors
+
+* @dependabot[bot] made their first contribution in https://github.com/foxws/laravel-media/pull/60
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.8...0.3.9
+
 ## 0.3.8 - 2026-10-14
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
