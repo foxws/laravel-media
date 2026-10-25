@@ -64,6 +64,18 @@ final readonly class Ladder
         ]);
     }
 
+    /**
+     * 2160p and 1440p above the standard ladder, for 4K sources.
+     */
+    public static function uhd(): self
+    {
+        return new self([
+            new Rendition(2160, 16000),
+            new Rendition(1440, 9000),
+            ...self::standard()->renditions,
+        ]);
+    }
+
     public function codec(VideoCodec $codec, string|int|null $preset = null): self
     {
         return $this->with(['codec' => $codec, 'preset' => $preset]);

@@ -24,6 +24,14 @@ it('skips renditions larger than the source', function () {
         ->and($heights(854, 480))->toBe([480, 360]);
 });
 
+it('adds 2160p and 1440p above the standard renditions for 4K sources', function () {
+    $heights = fn (int $width, int $height) => array_map(fn (Rendition $rendition) => $rendition->height, Ladder::uhd()->for(sourceVideo($width, $height)));
+
+    expect($heights(3840, 2160))->toBe([2160, 1440, 1080, 720, 480, 360])
+        ->and($heights(2560, 1440))->toBe([1440, 1080, 720, 480, 360])
+        ->and($heights(1920, 1080))->toBe([1080, 720, 480, 360]);
+});
+
 it('encodes a source smaller than every rendition at its own size', function () {
     expect(Ladder::standard()->for(sourceVideo(426, 241)))->toEqual([new Rendition(240, 800)]);
 });
