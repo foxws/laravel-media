@@ -131,6 +131,8 @@ $result = Media::fromDisk('uploads')->open($upload)
     ->toDisk('videos')
     ->save();
 
+Ladder::uhd();   // 2160p and 1440p above the standard sizes, for 4K sources
+
 new Ladder([new Rendition(1440, 9000), new Rendition(720, 3000)], VideoCodec::Hevc, preset: 'slow');
 Ladder::standard()->codec(VideoCodec::Av1)->hardware(HardwareAcceleration::Vaapi)->keyframeInterval(4);
 ```
