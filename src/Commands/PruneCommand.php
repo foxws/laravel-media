@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Commands;
 
+use Foxws\Media\Delivery\DatabaseIndexStore;
 use Foxws\Media\Filesystem\Disk;
+use Foxws\Media\Filesystem\Media;
+use Foxws\Media\Filesystem\TemporaryDirectories;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Config;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -16,7 +19,7 @@ class PruneCommand extends Command
         {--older-than=10080 : Minutes since a segment was packaged}
         {--dry-run : Count the segments without deleting them}';
 
-    protected $description = 'Delete cached segments of direct streams, which are packaged again when requested';
+    protected $description = 'Delete cached segments of direct streams, which are packaged again when requested, and the stored indexes of changed or deleted files';
 
     public function handle(): int
     {
@@ -46,7 +49,44 @@ class PruneCommand extends Command
             $minutes,
         ));
 
+        if (Config::string('media.delivery.index_store', 'cache') === 'database') {
+            $this->pruneIndexes(app(DatabaseIndexStore::class));
+        }
+
         return self::SUCCESS;
+    }
+
+    /**
+     * Delete the indexes of file versions that no longer exist: the file was changed, moved or
+     * deleted. Files on disks that aren't configured are kept.
+     */
+    protected function pruneIndexes(DatabaseIndexStore $store): void
+    {
+        $directories = app(TemporaryDirectories::class);
+        $stale = [];
+
+        foreach ($store->versions() as $version) {
+            if (! Config::has("filesystems.disks.{$version->disk}")) {
+                continue;
+            }
+
+            if ((new Media(Disk::make($version->disk), $version->path, $directories))->versionKey() !== $version->version_key) {
+                $stale[] = $version->version_key;
+            }
+        }
+
+        if (! $this->option('dry-run')) {
+            foreach (array_chunk($stale, 1000) as $keys) {
+                $store->delete($keys);
+            }
+        }
+
+        $this->components->info(sprintf(
+            '%s %d stored %s of changed or deleted files.',
+            $this->option('dry-run') ? 'Found' : 'Deleted',
+            count($stale),
+            count($stale) === 1 ? 'index' : 'indexes',
+        ));
     }
 
     /**
