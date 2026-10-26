@@ -10,9 +10,10 @@ use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Process\Runner;
 
 /**
- * Finds the keyframes of a video by listing its packets with ffprobe, which reads the container
- * without decoding. Indexes are kept in the IndexStore per file version, so a changed file is
- * indexed again.
+ * Finds the keyframes of a video. MP4 and MOV files on local disks are read from their sample
+ * tables, which takes a few megabytes; other files are listed packet by packet with ffprobe,
+ * which reads the whole container without decoding. Indexes are kept in the IndexStore per file
+ * version, so a changed file is indexed again.
  */
 class KeyframeIndexer
 {
@@ -31,7 +32,11 @@ class KeyframeIndexer
 
         /** @var array{keyframes: list<float>, duration: float} $cached */
         $cached = $this->store->remember($media, 'keyframes', function () use ($media, $duration): array {
-            $index = KeyframeIndex::fromPackets($this->packets($media), $duration);
+            $keyframes = $media->disk()->isLocal() ? Mp4KeyframeReader::read($media->localPath()) : null;
+
+            $index = $keyframes !== null
+                ? new KeyframeIndex($keyframes, $duration)
+                : KeyframeIndex::fromPackets($this->packets($media), $duration);
 
             return ['keyframes' => $index->keyframes, 'duration' => $index->duration];
         });

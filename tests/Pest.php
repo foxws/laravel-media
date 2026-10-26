@@ -400,3 +400,47 @@ function av1KeyFrameHeader(bool $small = false): array
         ...av1FrameTools(true),
     ];
 }
+
+/**
+ * A minimal MP4 file with a video track whose sample tables hold the samples, in the 30000
+ * timescale, without media data. Offsets are the composition offset of each sample, and edits
+ * the (media time, rate) of each edit list entry.
+ *
+ * @param  list<int>  $sync  1-based numbers of the sync samples, or null for no sync sample table
+ * @param  list<int>|null  $offsets
+ * @param  list<array{0: int, 1: int}>|null  $edits
+ */
+function mp4File(int $samples = 10, int $delta = 1001, ?array $sync = [1], ?array $offsets = null, ?array $edits = null, int $videoTracks = 1, bool $fragmented = false, bool $moovFirst = true, ?string $sampleGroup = null): string
+{
+    $table = fn (string $type, array $values, string $format = 'N'): string => mp4Box($type, pack('NN', 0, count($values)).implode('', array_map(fn ($value) => pack($format, ...(array) $value), $values)));
+
+    $stbl = mp4Box('stbl', implode('', [
+        mp4Box('stsd', pack('NN', 0, 0)),
+        $table('stts', [[$samples, $delta]], 'NN'),
+        $offsets !== null ? $table('ctts', array_map(fn (int $offset) => [1, $offset], $offsets), 'NN') : '',
+        $sync !== null ? $table('stss', $sync) : '',
+        $sampleGroup !== null ? mp4Box('sbgp', pack('N', 0).$sampleGroup.pack('N', 0)) : '',
+    ]));
+
+    $track = fn (string $handler): string => mp4Box('trak', implode('', [
+        mp4Box('tkhd', str_repeat("\0", 84)),
+        $edits !== null ? mp4Box('edts', $table('elst', array_map(fn (array $edit) => [$samples * $delta, $edit[0], $edit[1]], $edits), 'NNN')) : '',
+        mp4Box('mdia', implode('', [
+            mp4Box('mdhd', pack('NNNNNnn', 0, 0, 0, 30000, $samples * $delta, 0, 0)),
+            mp4Box('hdlr', pack('NN', 0, 0).$handler.str_repeat("\0", 13)),
+            mp4Box('minf', $stbl),
+        ])),
+    ]));
+
+    $moov = mp4Box('moov', implode('', [
+        mp4Box('mvhd', pack('NNNNN', 0, 0, 0, 1000, 0).str_repeat("\0", 80)),
+        str_repeat($track('vide'), $videoTracks),
+        $track('soun'),
+        $fragmented ? mp4Box('mvex', mp4Box('trex', str_repeat("\0", 24))) : '',
+    ]));
+
+    $ftyp = mp4Box('ftyp', 'isom'.pack('N', 512).'isomiso2avc1mp41');
+    $mdat = mp4Box('mdat', str_repeat("\0", 64));
+
+    return $moovFirst ? $ftyp.$moov.$mdat : $ftyp.$mdat.$moov;
+}

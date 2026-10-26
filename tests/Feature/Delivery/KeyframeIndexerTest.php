@@ -69,3 +69,23 @@ it('uses the configured cache store', function () {
     expect(Cache::store('array')->getStore())->toBeInstanceOf(ArrayStore::class);
     Process::assertRanTimes(fn ($process) => in_array('packet=pts_time,flags', $process->command, true), 1);
 });
+
+it('reads the keyframes of mp4 files on local disks without listing packets', function () {
+    fakeKeyframes('', videoProbe(duration: 12));
+    Storage::fake('videos');
+    Storage::disk('videos')->put('video.mp4', mp4File(samples: 10, sync: [1, 6]));
+
+    $index = Media::fromDisk('videos')->open('video.mp4')->keyframes();
+
+    expect($index->keyframes)->toBe([0.0, 0.166833]);
+    Process::assertDidntRun(fn ($process) => in_array('packet=pts_time,flags', $process->command, true));
+});
+
+it('lists the packets of mp4 files the sample tables do not describe exactly', function () {
+    fakeKeyframes("0.000000,K__\n", videoProbe(duration: 12));
+    Storage::fake('videos');
+    Storage::disk('videos')->put('video.mp4', mp4File(fragmented: true));
+
+    expect(Media::fromDisk('videos')->open('video.mp4')->keyframes()->keyframes)->toBe([0.0]);
+    Process::assertRanTimes(fn ($process) => in_array('packet=pts_time,flags', $process->command, true), 1);
+});

@@ -696,6 +696,20 @@ it('converts an embedded subtitle stream to webvtt once', function () {
         ->and(Storage::disk('segments')->allFiles()[0])->toMatch('#^media-segments/[0-9a-f]{32}/subtitles/2\.vtt$#');
 });
 
+it('converts every embedded subtitle stream in one run', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(subtitles: ['eng', 'nld'])]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->withEmbeddedSubtitles();
+
+    $stream->subtitle(0);
+    $stream->subtitle(1);
+
+    Media::assertRanTimes(Executable::FFMpeg, 1);
+    Media::assertRan(Executable::FFMpeg, fn (array $arguments) => count(array_keys($arguments, '-map', true)) === 2
+        && in_array('0:2', $arguments, true)
+        && in_array('0:3', $arguments, true));
+    expect(array_map('basename', Storage::disk('segments')->allFiles()))->toEqualCanonicalizing(['2.vtt', '3.vtt']);
+});
+
 it('adds subtitles to the dash manifest as webvtt files', function () {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
 
