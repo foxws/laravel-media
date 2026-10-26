@@ -2,6 +2,11 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.4.1 - 2026-10-26
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.4.0...0.4.1
+
 ## 0.4.0 - 2026-10-26
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
