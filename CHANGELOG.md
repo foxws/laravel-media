@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.4.0 - 2026-10-26
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Keep probes and keyframe indexes in a database store and warm streams ahead of playback by @francoism90 in https://github.com/foxws/laravel-media/pull/62
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.3.9...0.4.0
+
 ## 0.3.9 - 2026-10-25
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
