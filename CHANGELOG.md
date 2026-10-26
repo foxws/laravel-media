@@ -2,6 +2,17 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.4.2 - 2026-10-26
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Read MP4 keyframes from the sample tables and convert embedded subtitles in one run by @francoism90 in https://github.com/foxws/laravel-media/pull/63
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.4.1...0.4.2
+
 ## 0.4.1 - 2026-10-26
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
