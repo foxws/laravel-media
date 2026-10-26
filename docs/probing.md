@@ -56,7 +56,7 @@ $index->segments(6);        // list<Segment>, each at least 6 seconds and starti
 $index->longestSegment(6);
 ```
 
-Indexes are kept per file version in the [index store](streaming.md#the-index-store). Streaming relies on them: segments that start on a keyframe can be copied without re-encoding. Listing the packets reads the whole file once, so index large files ahead of playback with `warm()`.
+Indexes are kept per file version in the [index store](streaming.md#the-index-store). Streaming relies on them: segments that start on a keyframe can be copied without re-encoding. MP4 and MOV files on local disks are indexed from the sample tables in their moov box, which takes a few megabytes. Other files, and MP4 files whose tables ffprobe would read differently (fragmented files, several video tracks, complex edit lists, open-GOP sample groups), are listed packet by packet with ffprobe, which reads the whole file once, so index large files ahead of playback with `warm()`.
 
 ## Validating uploads
 

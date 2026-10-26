@@ -186,7 +186,7 @@ Media::fromDisk('videos')->open(['movie.mkv', 'movie-audio.m4a'])->stream()->tra
 
 ## The index store
 
-Probes and keyframe indexes are kept per file version, so only the first request for a file runs ffprobe. Indexing lists every packet of the video, which reads the whole file, so on slow or cold storage the first request can take a while.
+Probes and keyframe indexes are kept per file version, so only the first request for a file runs ffprobe. MP4 and MOV files on local disks are indexed from their sample tables, which is quick. Other files are indexed by listing every packet of the video, which reads the whole file, so on slow or cold storage the first request can take a while.
 
 - **Cache (default):** `media.delivery.index_store` is `cache`, which keeps them in `media.delivery.cache_store` for `media.delivery.index_lifetime` seconds. After that, or after `cache:clear`, the file is read again.
 - **Database:** set `MEDIA_DELIVERY_INDEX_STORE=database` to keep them in the `media_indexes` table (on `media.delivery.index_connection`) without expiring. Publish and run its migration:

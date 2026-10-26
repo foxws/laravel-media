@@ -303,7 +303,8 @@ class DirectStream
 
     /**
      * The WebVTT content of a subtitle track. Embedded streams are converted once, under a lock,
-     * and cached on the cache disk.
+     * and cached on the cache disk. Every embedded stream that isn't cached yet is converted in
+     * the same ffmpeg run, since each run reads through the whole file.
      *
      * @throws SegmentNotFoundException
      */
@@ -316,13 +317,14 @@ class DirectStream
         }
 
         $media = $this->media(0);
-        $path = $this->cachePrefix($media, withDuration: false)."/subtitles/{$track->stream}.vtt";
+        $directory = $this->cachePrefix($media, withDuration: false).'/subtitles';
+        $path = "{$directory}/{$track->stream}.vtt";
 
         if (! $this->cacheDisk()->exists($path)) {
-            Cache::lock("media:segment:{$path}", Config::integer('media.delivery.lock_timeout', 120))
-                ->block(Config::integer('media.delivery.lock_timeout', 120), function () use ($media, $track, $path): void {
+            Cache::lock("media:segment:{$directory}", Config::integer('media.delivery.lock_timeout', 120))
+                ->block(Config::integer('media.delivery.lock_timeout', 120), function () use ($media, $directory, $path): void {
                     if (! $this->cacheDisk()->exists($path)) {
-                        $this->convertSubtitle($media, (int) $track->stream, $path);
+                        $this->convertSubtitles($media, $directory);
                     }
                 });
         }
@@ -1336,10 +1338,20 @@ class DirectStream
     }
 
     /**
-     * Convert an embedded text subtitle stream to WebVTT on the cache disk.
+     * Convert the embedded text subtitle streams that aren't cached yet to WebVTT on the cache
+     * disk, in one ffmpeg run with an output per stream.
      */
-    protected function convertSubtitle(Media $media, int $stream, string $path): void
+    protected function convertSubtitles(Media $media, string $path): void
     {
+        $streams = array_values(array_filter(
+            array_map(fn (Subtitle $subtitle): ?int => $subtitle->stream, $this->subtitles()),
+            fn (?int $stream): bool => $stream !== null && ! $this->cacheDisk()->exists("{$path}/{$stream}.vtt"),
+        ));
+
+        if ($streams === []) {
+            return;
+        }
+
         $directory = $this->directories->create();
 
         try {
@@ -1350,13 +1362,15 @@ class DirectStream
                 '-loglevel', Config::string('media.ffmpeg_log_level', 'error'),
                 ...$media->inputArguments(),
                 '-i', $media->inputPath(),
-                '-map', "0:{$stream}",
-                '-c:s', 'webvtt',
-                '-f', 'webvtt',
-                $directory->path(basename($path)),
+                ...array_merge(...array_map(fn (int $stream): array => [
+                    '-map', "0:{$stream}",
+                    '-c:s', 'webvtt',
+                    '-f', 'webvtt',
+                    $directory->path("{$stream}.vtt"),
+                ], $streams)),
             ]);
 
-            $this->exporter->export($directory->path(), $this->cacheDisk(), dirname($path), move: true);
+            $this->exporter->export($directory->path(), $this->cacheDisk(), $path, move: true);
         } finally {
             $directory->delete();
         }
