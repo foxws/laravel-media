@@ -8,18 +8,20 @@ use Foxws\Media\Concerns\ResolvesFromContainer;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Process\Runner;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Config;
 
 /**
  * Finds the keyframes of a video by listing its packets with ffprobe, which reads the container
- * without decoding. Indexes are cached per file version, so a changed file is indexed again.
+ * without decoding. Indexes are kept in the IndexStore per file version, so a changed file is
+ * indexed again.
  */
 class KeyframeIndexer
 {
     use ResolvesFromContainer;
 
-    public function __construct(protected Runner $runner) {}
+    public function __construct(
+        protected Runner $runner,
+        protected IndexStore $store,
+    ) {}
 
     public function index(Media $media, float $duration, bool $hasVideo = true): KeyframeIndex
     {
@@ -27,10 +29,8 @@ class KeyframeIndexer
             return new KeyframeIndex([], $duration);
         }
 
-        $store = Cache::store(Config::get('media.delivery.cache_store'));
-
         /** @var array{keyframes: list<float>, duration: float} $cached */
-        $cached = $store->remember('media:keyframes:'.$media->versionKey(), Config::integer('media.delivery.index_lifetime', 604800), function () use ($media, $duration): array {
+        $cached = $this->store->remember($media, 'keyframes', function () use ($media, $duration): array {
             $index = KeyframeIndex::fromPackets($this->packets($media), $duration);
 
             return ['keyframes' => $index->keyframes, 'duration' => $index->duration];

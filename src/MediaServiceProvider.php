@@ -7,6 +7,9 @@ namespace Foxws\Media;
 use Foxws\Media\Commands\CleanCommand;
 use Foxws\Media\Commands\InfoCommand;
 use Foxws\Media\Commands\PruneCommand;
+use Foxws\Media\Delivery\CacheIndexStore;
+use Foxws\Media\Delivery\DatabaseIndexStore;
+use Foxws\Media\Delivery\IndexStore;
 use Foxws\Media\Delivery\StreamRegistry;
 use Foxws\Media\Executables\Executables;
 use Foxws\Media\Filesystem\Disk;
@@ -42,6 +45,11 @@ class MediaServiceProvider extends ServiceProvider
         $this->app->singleton(MediaFactory::class);
         $this->app->singleton(PackagerManager::class);
         $this->app->singleton(StreamRegistry::class);
+
+        $this->app->bind(IndexStore::class, fn (Application $app): IndexStore => match (Config::string('media.delivery.index_store', 'cache')) {
+            'database' => $app->make(DatabaseIndexStore::class),
+            default => $app->make(CacheIndexStore::class),
+        });
 
         $this->app->singleton(TemporaryDirectories::class, fn (): TemporaryDirectories => new TemporaryDirectories(
             root: Config::string('media.temporary_files.root', sys_get_temp_dir()),
@@ -89,6 +97,10 @@ class MediaServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../config/media.php' => config_path('media.php'),
         ], ['media', 'media-config']);
+
+        $this->publishes([
+            __DIR__.'/../database/migrations/create_media_indexes_table.php.stub' => database_path('migrations/'.date('Y_m_d_His').'_create_media_indexes_table.php'),
+        ], 'media-migrations');
     }
 
     /**

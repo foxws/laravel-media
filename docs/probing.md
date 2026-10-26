@@ -56,7 +56,7 @@ $index->segments(6);        // list<Segment>, each at least 6 seconds and starti
 $index->longestSegment(6);
 ```
 
-Indexes are cached per file version for `media.delivery.index_lifetime` seconds. Streaming relies on them: segments that start on a keyframe can be copied without re-encoding.
+Indexes are kept per file version in the [index store](streaming.md#the-index-store). Streaming relies on them: segments that start on a keyframe can be copied without re-encoding. Listing the packets reads the whole file once, so index large files ahead of playback with `warm()`.
 
 ## Validating uploads
 

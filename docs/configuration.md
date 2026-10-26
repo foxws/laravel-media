@@ -35,8 +35,10 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | `delivery.cache_path` | `MEDIA_DELIVERY_CACHE_PATH` | `media-segments` | The directory on that disk |
 | `delivery.url_lifetime` | `MEDIA_DELIVERY_URL_LIFETIME` | `3600` | Lifetime of signed and temporary URLs, and of cache headers |
 | `delivery.lock_timeout` | `MEDIA_DELIVERY_LOCK_TIMEOUT` | `120` | How long requests wait for a segment that's being packaged |
-| `delivery.cache_store` | `MEDIA_DELIVERY_CACHE_STORE` | the default store | Where probes and keyframe indexes are kept |
-| `delivery.index_lifetime` | `MEDIA_DELIVERY_INDEX_LIFETIME` | `604800` | How long they're kept |
+| `delivery.index_store` | `MEDIA_DELIVERY_INDEX_STORE` | `cache` | Where probes and keyframe indexes are kept: `cache` or `database` |
+| `delivery.index_connection` | `MEDIA_DELIVERY_INDEX_CONNECTION` | the default connection | The connection of the `media_indexes` table |
+| `delivery.cache_store` | `MEDIA_DELIVERY_CACHE_STORE` | the default store | The cache store of the `cache` index store and segment locks |
+| `delivery.index_lifetime` | `MEDIA_DELIVERY_INDEX_LIFETIME` | `604800` | How long the `cache` index store keeps them |
 | `delivery.look_ahead` | `MEDIA_DELIVERY_LOOK_AHEAD` | `2` | Segments packaged ahead of the player |
 | `delivery.look_ahead_via` | `MEDIA_DELIVERY_LOOK_AHEAD_VIA` | `queue` | `queue`, `defer` (after the response) or `null` (off) |
 | `delivery.look_ahead_connection` | `MEDIA_DELIVERY_LOOK_AHEAD_CONNECTION` | the default connection | Queue connection of the look-ahead job |

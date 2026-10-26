@@ -1143,6 +1143,28 @@ class DirectStream
     }
 
     /**
+     * Probe and index every opened file and convert the embedded subtitles before the stream is
+     * first requested, e.g. in a queued job after an upload, so playback doesn't wait for ffprobe
+     * to read through the files. Call packageStart() too to package the first segments.
+     *
+     * @throws SegmentNotFoundException
+     */
+    public function warm(): static
+    {
+        foreach (array_keys($this->opener->paths()) as $variant) {
+            $this->index($variant);
+        }
+
+        foreach ($this->subtitles() as $subtitle => $track) {
+            if ($track->isEmbedded()) {
+                $this->subtitle($subtitle);
+            }
+        }
+
+        return $this;
+    }
+
+    /**
      * Whether a job can open the media and the cache disk by name, on a queue that doesn't run
      * the job straight away.
      */

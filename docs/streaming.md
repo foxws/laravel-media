@@ -181,8 +181,27 @@ Media::fromDisk('videos')->open(['movie.mkv', 'movie-audio.m4a'])->stream()->tra
 - **Per file version:** segments are keyed by the disk, path, size and modification time of the source, so every viewer shares them and a replaced file gets new ones.
 - **One package per segment:** concurrent requests for the same segment package it once.
 - **Look-ahead:** after a segment is requested, the next `media.delivery.look_ahead` segments are packaged ahead in a `PackageSegments` job, so they're cached before the player asks. Set `look_ahead_via` to `defer` to package them after the response instead, or `null` to turn it off. Per stream: `lookAhead(4)`.
-- **Probes:** each file is probed once per version, then read from the cache store, so playlist and segment requests don't run ffprobe.
+- **Probes:** each file is probed once per version, then read from the [index store](#the-index-store), so playlist and segment requests don't run ffprobe.
 - **Pruning:** schedule `media:prune` to delete old segments. `media:prune --older-than=0` empties the cache.
+
+## The index store
+
+Probes and keyframe indexes are kept per file version, so only the first request for a file runs ffprobe. Indexing lists every packet of the video, which reads the whole file, so on slow or cold storage the first request can take a while.
+
+- **Cache (default):** `media.delivery.index_store` is `cache`, which keeps them in `media.delivery.cache_store` for `media.delivery.index_lifetime` seconds. After that, or after `cache:clear`, the file is read again.
+- **Database:** set `MEDIA_DELIVERY_INDEX_STORE=database` to keep them in the `media_indexes` table (on `media.delivery.index_connection`) without expiring. Publish and run its migration:
+
+  ```bash
+  php artisan vendor:publish --tag=media-migrations
+  php artisan migrate
+  ```
+
+  `media:prune` deletes the rows of files that were changed, moved or deleted. Call `app(IndexStore::class)->forget($media)` to drop a file's rows straight away.
+- **Warming:** call `warm()` on a stream, e.g. in a queued job after an upload, to probe and index its files and convert embedded subtitles before anyone plays it. Add `packageStart()` to package the first segments too:
+
+  ```php
+  Media::fromDisk('videos')->open($path)->stream()->withEmbeddedSubtitles()->warm();
+  ```
 
 ## Without the routes
 
