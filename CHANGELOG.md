@@ -2,6 +2,18 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.5.0 - 2026-11-12
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Bump stefanzweifel/git-auto-commit-action from 7.2.0 to 7.2.1 by @dependabot[bot] in https://github.com/foxws/laravel-media/pull/64
+* Serve direct stream segments with fewer lookups, encrypt them once and stop waiting on slow encodes by @francoism90 in https://github.com/foxws/laravel-media/pull/65
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.4.2...0.5.0
+
 ## 0.4.2 - 2026-10-26
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
