@@ -84,9 +84,16 @@ return [
     | Packaged segments are cached on cache_disk under cache_path, which can be
     | any disk: local storage, a mounted /tmp or RAM disk, or S3. Segments on
     | disks with temporary URLs are served by redirecting to one that is valid
-    | for url_lifetime seconds. lock_timeout is how long concurrent requests
-    | for the same segment wait while it's packaged. Schedule "media:prune" to
-    | delete old segments; they are packaged again when requested.
+    | for url_lifetime seconds; local segments are sent as files, with an ETag
+    | and range requests. lock_timeout is how long concurrent requests for the
+    | same segment wait while it's packaged. Renditions encoded on request wait
+    | rendition_lock_wait seconds instead (lock_timeout when null), then answer
+    | 503 with Retry-After, so a slow encode doesn't hold every worker; keep it
+    | below your player's request timeout. Schedule "media:prune" to delete
+    | old segments; they are packaged again when requested.
+    |
+    | Encrypted streams keep each segment encrypted with its key next to the
+    | unencrypted one, so it's encrypted once instead of on every request.
     |
     | After a segment is requested, the next look_ahead segments are packaged
     | ahead of their requests, and a playlist or manifest request packages the
@@ -106,6 +113,7 @@ return [
         'cache_path' => env('MEDIA_DELIVERY_CACHE_PATH', 'media-segments'),
         'url_lifetime' => (int) env('MEDIA_DELIVERY_URL_LIFETIME', 3600),
         'lock_timeout' => (int) env('MEDIA_DELIVERY_LOCK_TIMEOUT', 120),
+        'rendition_lock_wait' => env('MEDIA_DELIVERY_RENDITION_LOCK_WAIT'),
         'cache_store' => env('MEDIA_DELIVERY_CACHE_STORE'),
         'index_store' => env('MEDIA_DELIVERY_INDEX_STORE', 'cache'),
         'index_connection' => env('MEDIA_DELIVERY_INDEX_CONNECTION'),

@@ -12,6 +12,7 @@ use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
+use Foxws\Media\Exceptions\SegmentNotReadyException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\ThumbnailsResult;
@@ -25,13 +26,16 @@ use Foxws\Media\Probe\AudioStream;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\VideoStream;
 use Foxws\Media\Process\Runner;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -70,9 +74,10 @@ class DirectStream
     /** @var list<Subtitle>|null */
     protected ?array $subtitles = null;
 
-    protected ?ThumbnailsResult $thumbnails = null;
+    /** @var ThumbnailsResult|(Closure(): ?ThumbnailsResult)|null */
+    protected ThumbnailsResult|Closure|null $thumbnails = null;
 
-    /** @var list<Marker> */
+    /** @var list<list<Marker>|(Closure(): list<Marker>)> */
     protected array $markers = [];
 
     protected bool $chapters = false;
@@ -370,9 +375,12 @@ class DirectStream
     /**
      * Offer sprite sheets made with thumbnails() as an image track, for seek previews from the
      * manifest. Make them ahead, e.g. in the job that stores the video, and keep the result with
-     * toArray(); sampling a whole video is too slow for a request.
+     * toArray(); sampling a whole video is too slow for a request. A closure is called the first
+     * time a playlist, manifest or sheet needs them, so segment requests don't look them up.
+     *
+     * @param  ThumbnailsResult|(Closure(): ?ThumbnailsResult)|null  $thumbnails
      */
-    public function withThumbnails(?ThumbnailsResult $thumbnails): static
+    public function withThumbnails(ThumbnailsResult|Closure|null $thumbnails): static
     {
         $this->thumbnails = $thumbnails;
 
@@ -381,6 +389,10 @@ class DirectStream
 
     public function thumbnails(): ?ThumbnailsResult
     {
+        if ($this->thumbnails instanceof Closure) {
+            $this->thumbnails = ($this->thumbnails)();
+        }
+
         return $this->thumbnails;
     }
 
@@ -393,7 +405,7 @@ class DirectStream
      */
     public function thumbnailPlaylist(callable $sheetUrl): string
     {
-        $thumbnails = $this->thumbnails ?? throw SegmentNotFoundException::noThumbnails();
+        $thumbnails = $this->thumbnails() ?? throw SegmentNotFoundException::noThumbnails();
         $longest = max([0.0, ...array_map($thumbnails->sheetDuration(...), array_keys($thumbnails->sprites))]);
 
         $lines = [
@@ -424,7 +436,7 @@ class DirectStream
      */
     public function thumbnailResponse(int $sheet): Response
     {
-        $thumbnails = $this->thumbnails ?? throw SegmentNotFoundException::noThumbnails();
+        $thumbnails = $this->thumbnails() ?? throw SegmentNotFoundException::noThumbnails();
         $path = $thumbnails->sprites[$sheet] ?? throw SegmentNotFoundException::forSheet($sheet);
 
         return $this->fileResponse($path, $this->imageType($thumbnails), $thumbnails->disk);
@@ -459,13 +471,14 @@ class DirectStream
 
     /**
      * Offer named time ranges, like an intro or the credits, as #EXT-X-DATERANGE tags in the HLS media
-     * playlists and as Events in the DASH manifest.
+     * playlists and as Events in the DASH manifest. A closure is called the first time a playlist,
+     * manifest or the chapter track needs them, so segment requests don't look them up.
      *
-     * @param  list<Marker>  $markers
+     * @param  list<Marker>|(Closure(): list<Marker>)  $markers
      */
-    public function withMarkers(array $markers): static
+    public function withMarkers(array|Closure $markers): static
     {
-        $this->markers = [...$this->markers, ...$markers];
+        $this->markers[] = $markers;
 
         return $this;
     }
@@ -498,7 +511,15 @@ class DirectStream
      */
     public function markers(): array
     {
-        $markers = $this->markers;
+        $markers = [];
+
+        foreach ($this->markers as $position => $added) {
+            if ($added instanceof Closure) {
+                $added = $this->markers[$position] = $added();
+            }
+
+            array_push($markers, ...$added);
+        }
 
         if ($this->chapters && ($path = $this->opener->paths()[0] ?? null) !== null) {
             $markers = [...array_map(Marker::fromChapter(...), $this->opener->probe($path)->chapters()), ...$markers];
@@ -552,9 +573,9 @@ class DirectStream
     }
 
     /**
-     * Encrypt segments for each request; the cached segments stay unencrypted, so they can be served
-     * with any key. MPEG-TS segments are encrypted whole with AES-128, and HLS players fetch the key
-     * from the key URL (keyResponse()). Fragmented MP4 segments use Common Encryption (cenc) with one
+     * Encrypt segments as they're served; the cached segments stay unencrypted, so they can be served
+     * with any key, and each is encrypted once per key into a copy next to it. MPEG-TS segments are
+     * encrypted whole with AES-128, and HLS players fetch the key from the key URL (keyResponse()). Fragmented MP4 segments use Common Encryption (cenc) with one
      * key: CMAF playlists fetch it from the key URL too, and DASH players request it as a ClearKey
      * license from the license URL (licenseResponse()). Route::mediaStream() sets both URLs itself.
      *
@@ -863,16 +884,16 @@ class DirectStream
             ]);
         }
 
-        if ($this->thumbnails !== null) {
+        if (($thumbnails = $this->thumbnails()) !== null) {
             $sets[] = $this->thumbnailAdaptationSet(
-                $this->thumbnails,
+                $thumbnails,
                 $offset + count($this->subtitles()),
                 $thumbnailUrl ?? throw new InvalidArgumentException('Streams with thumbnails need the URLs of their sprite sheets.'),
             );
         }
 
         if ($trickSet !== null) {
-            $sets[] = str_replace('{id}', (string) ($offset + count($this->subtitles()) + ($this->thumbnails !== null ? 1 : 0)), $trickSet);
+            $sets[] = str_replace('{id}', (string) ($offset + count($this->subtitles()) + ($this->thumbnails() !== null ? 1 : 0)), $trickSet);
         }
 
         return implode("\n", [
@@ -901,27 +922,24 @@ class DirectStream
     /**
      * The path of a segment on the cache disk, packaging it first if it isn't cached yet: MPEG-TS
      * with video and audio, or fragmented MP4 with one track. Packaging runs under a lock, so
-     * concurrent requests for the same segment package it once.
+     * concurrent requests for the same segment package it once. Requests for a rendition stop waiting
+     * after media.delivery.rendition_lock_wait seconds, and other requests after lock_timeout.
      *
      * @throws SegmentNotFoundException
+     * @throws SegmentNotReadyException
      * @throws InvalidMediaException
      */
     public function segment(int $variant, int $index, ?Track $track = null, int $stream = 0): string
     {
-        $media = $this->media($variant);
-        $rendition = $this->rendition($variant);
-        $segment = $this->segments($variant)[$index] ?? throw SegmentNotFoundException::for($variant, $index);
+        $path = $this->segmentPathFor($variant, $index, $track, $stream);
 
-        if ($rendition !== null && ($track !== Track::Video || $stream !== 0)) {
-            throw SegmentNotFoundException::forTrack($variant, $track?->name($stream) ?? 'ts');
-        }
-
-        $path = $this->segmentPath($media, $segment, $track, $stream, $rendition);
-        $disk = $this->cacheDisk();
-
-        if ($disk->exists($path)) {
+        if ($this->cacheDisk()->exists($path)) {
             return $path;
         }
+
+        $media = $this->media($variant);
+        $rendition = $this->rendition($variant);
+        $segment = $this->segments($variant)[$index];
 
         if ($track !== null) {
             $this->ensureTrack($variant, $track, $stream);
@@ -931,15 +949,39 @@ class DirectStream
             $this->ensureStreamable($media, $track, $stream);
         }
 
-        return Cache::lock("media:segment:{$path}", Config::integer('media.delivery.lock_timeout', 120))
-            ->block(Config::integer('media.delivery.lock_timeout', 120), function () use ($media, $segment, $path, $track, $stream, $rendition): string {
-                // Another request may have packaged it while this one waited for the lock.
-                if (! $this->cacheDisk()->exists($path)) {
-                    $track !== null ? $this->packageFragment($media, $segment, $track, $stream, $path, $rendition) : $this->package($media, $segment, $path);
-                }
+        $timeout = Config::integer('media.delivery.lock_timeout', 120);
+        $wait = Config::get('media.delivery.rendition_lock_wait');
 
-                return $path;
-            });
+        try {
+            return Cache::lock("media:segment:{$path}", $timeout)
+                ->block($rendition !== null && is_numeric($wait) ? (int) $wait : $timeout, function () use ($media, $segment, $path, $track, $stream, $rendition): string {
+                    // Another request may have packaged it while this one waited for the lock.
+                    if (! $this->cacheDisk()->exists($path)) {
+                        $track !== null ? $this->packageFragment($media, $segment, $track, $stream, $path, $rendition) : $this->package($media, $segment, $path);
+                    }
+
+                    return $path;
+                });
+        } catch (LockTimeoutException) {
+            throw SegmentNotReadyException::for($variant, $index);
+        }
+    }
+
+    /**
+     * Where a segment is cached, whether it's packaged yet or not.
+     *
+     * @throws SegmentNotFoundException
+     */
+    protected function segmentPathFor(int $variant, int $index, ?Track $track = null, int $stream = 0): string
+    {
+        $rendition = $this->rendition($variant);
+        $segment = $this->segments($variant)[$index] ?? throw SegmentNotFoundException::for($variant, $index);
+
+        if ($rendition !== null && ($track !== Track::Video || $stream !== 0)) {
+            throw SegmentNotFoundException::forTrack($variant, $track?->name($stream) ?? 'ts');
+        }
+
+        return $this->segmentPath($this->media($variant), $segment, $track, $stream, $rendition);
     }
 
     /**
@@ -969,19 +1011,11 @@ class DirectStream
      */
     public function initSegmentResponse(int $variant, Track $track, int $stream = 0): Response
     {
-        if ($this->keys !== null) {
-            $content = $this->initSegmentContents($variant, $track, $stream);
-
-            $this->packageAhead($variant, 1, $track, $stream);
-
-            return $this->encryptedResponse($content, $track->contentType());
-        }
-
-        $path = $this->initSegment($variant, $track, $stream);
+        $path = $this->keys !== null ? $this->encryptedInitSegment($variant, $track, $stream) : $this->initSegment($variant, $track, $stream);
 
         $this->packageAhead($variant, 1, $track, $stream);
 
-        return $this->fileResponse($path, $track->contentType());
+        return $this->fileResponse($path, $track->contentType(), encrypted: $this->keys !== null);
     }
 
     /**
@@ -992,14 +1026,9 @@ class DirectStream
      */
     public function initSegmentContents(int $variant, Track $track, int $stream = 0): string
     {
-        if ($this->keys !== null) {
-            $this->ensureOneKey();
-            $this->ensureEncryptable($variant, $track, $stream);
-        }
+        $path = $this->keys !== null ? $this->encryptedInitSegment($variant, $track, $stream) : $this->initSegment($variant, $track, $stream);
 
-        $content = $this->cachedInitSegment($variant, $track, $stream);
-
-        return $this->keys !== null ? CommonEncryption::init($content, $this->key()) : $content;
+        return (string) $this->cacheDisk()->get($path);
     }
 
     /**
@@ -1012,21 +1041,11 @@ class DirectStream
      */
     public function segmentResponse(int $variant, int $index, ?Track $track = null, int $stream = 0): Response
     {
-        $contentType = $track?->contentType() ?? 'video/mp2t';
-
-        if ($this->keys !== null) {
-            $content = $this->segmentContents($variant, $index, $track, $stream);
-
-            $this->packageAhead($variant, $index + 1, $track, $stream);
-
-            return $this->encryptedResponse($content, $contentType);
-        }
-
-        $path = $this->segment($variant, $index, $track, $stream);
+        $path = $this->keys !== null ? $this->encryptedSegment($variant, $index, $track, $stream) : $this->segment($variant, $index, $track, $stream);
 
         $this->packageAhead($variant, $index + 1, $track, $stream);
 
-        return $this->fileResponse($path, $contentType);
+        return $this->fileResponse($path, $track?->contentType() ?? 'video/mp2t', encrypted: $this->keys !== null);
     }
 
     /**
@@ -1038,37 +1057,84 @@ class DirectStream
      */
     public function segmentContents(int $variant, int $index, ?Track $track = null, int $stream = 0): string
     {
-        if ($this->keys !== null && $track !== null) {
+        $path = $this->keys !== null ? $this->encryptedSegment($variant, $index, $track, $stream) : $this->segment($variant, $index, $track, $stream);
+
+        return (string) $this->cacheDisk()->get($path);
+    }
+
+    /**
+     * The path of a segment encrypted with its key on the cache disk, encrypting the cached segment
+     * the first time: whole with AES-128 for MPEG-TS, or with Common Encryption for a fragmented
+     * track. The result only depends on the segment and the key, so it's kept per key.
+     *
+     * @throws SegmentNotFoundException
+     * @throws InvalidMediaException
+     */
+    protected function encryptedSegment(int $variant, int $index, ?Track $track = null, int $stream = 0): string
+    {
+        if ($track !== null) {
             $this->ensureOneKey();
             $this->ensureEncryptable($variant, $track, $stream);
         }
 
-        $content = (string) $this->cacheDisk()->get($this->segment($variant, $index, $track, $stream));
+        $key = $track !== null ? $this->key() : $this->key($this->period($index));
+        $path = $this->encryptedPath($this->segmentPathFor($variant, $index, $track, $stream), $key);
 
-        if ($this->keys === null) {
-            return $content;
+        if (! $this->cacheDisk()->exists($path)) {
+            $content = (string) $this->cacheDisk()->get($this->segment($variant, $index, $track, $stream));
+
+            $this->putCached($path, $track !== null
+                ? CommonEncryption::segment((string) $this->cacheDisk()->get($this->initSegment($variant, $track, $stream)), $content, $key, "{$variant}|{$track->name($stream)}|{$index}")
+                : $this->encrypt($content, $index));
         }
 
-        return $track !== null
-            ? CommonEncryption::segment($this->cachedInitSegment($variant, $track, $stream), $content, $this->key(), "{$variant}|{$track->name($stream)}|{$index}")
-            : $this->encrypt($content, $index);
+        return $path;
     }
 
     /**
+     * The path of a track's initialization segment marked as encrypted, kept per key like the segments.
+     *
      * @throws SegmentNotFoundException
      * @throws InvalidMediaException
      */
-    protected function cachedInitSegment(int $variant, Track $track, int $stream = 0): string
+    protected function encryptedInitSegment(int $variant, Track $track, int $stream = 0): string
     {
-        return (string) $this->cacheDisk()->get($this->initSegment($variant, $track, $stream));
+        $this->ensureOneKey();
+        $this->ensureEncryptable($variant, $track, $stream);
+
+        $key = $this->key();
+        $path = $this->encryptedPath($this->initPath($this->media($variant), $track, $stream, $this->rendition($variant)), $key);
+
+        if (! $this->cacheDisk()->exists($path)) {
+            $this->putCached($path, CommonEncryption::init((string) $this->cacheDisk()->get($this->initSegment($variant, $track, $stream)), $key));
+        }
+
+        return $path;
     }
 
-    protected function encryptedResponse(string $content, string $contentType): Response
+    /**
+     * Where the encrypted copy of a cached file is kept: next to it, in a directory named by a hash of
+     * the key, which can't be turned back into the key.
+     */
+    protected function encryptedPath(string $path, EncryptionKey $key): string
     {
-        return new Response($content, 200, [
-            'Content-Type' => $contentType,
-            'Cache-Control' => 'private, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
-        ]);
+        return dirname($path).'/encrypted-'.substr(hash('sha256', "{$key->key}|{$key->keyId}"), 0, 32).'/'.basename($path);
+    }
+
+    /**
+     * Write a file to the cache disk through a temporary directory, so requests never read it half written.
+     */
+    protected function putCached(string $path, string $content): void
+    {
+        $directory = $this->directories->create();
+
+        try {
+            file_put_contents($directory->path(basename($path)), $content);
+
+            $this->exporter->export($directory->path(), $this->cacheDisk(), dirname($path), move: true);
+        } finally {
+            $directory->delete();
+        }
     }
 
     /**
@@ -1101,15 +1167,18 @@ class DirectStream
             return;
         }
 
+        // A job per segment, so the overlapping windows of consecutive requests are queued once each.
         if ($strategy === LookAheadStrategy::Queue && $this->canQueue($media)) {
             $connection = Config::get('media.delivery.look_ahead_connection');
             $queue = Config::get('media.delivery.look_ahead_queue');
 
-            Bus::dispatch(
-                new PackageSegments($media->disk()->name(), $media->path(), $missing, $track, $this->targetDuration(), $this->cacheDisk()->name(), $stream, ...$this->renditionJob($variant))
-                    ->onConnection(is_string($connection) ? $connection : null)
-                    ->onQueue(is_string($queue) ? $queue : null),
-            );
+            foreach ($missing as $index) {
+                Bus::dispatch(
+                    new PackageSegments($media->disk()->name(), $media->path(), [$index], $track, $this->targetDuration(), $this->cacheDisk()->name(), $stream, ...$this->renditionJob($variant))
+                        ->onConnection(is_string($connection) ? $connection : null)
+                        ->onQueue(is_string($queue) ? $queue : null),
+                );
+            }
 
             return;
         }
@@ -1180,19 +1249,42 @@ class DirectStream
             && Config::get("queue.connections.{$connection}.driver") !== 'sync';
     }
 
-    protected function fileResponse(string $path, string $contentType, ?Disk $disk = null): Response
+    /**
+     * A file from a disk: a redirect to a temporary URL when the disk provides them, the file itself
+     * from a local disk, with an ETag and range support (and X-Sendfile when the application trusts
+     * it), or streamed from other disks. Encrypted files are never redirected to and aren't cached by
+     * shared caches.
+     */
+    protected function fileResponse(string $path, string $contentType, ?Disk $disk = null, bool $encrypted = false): Response
     {
         $disk ??= $this->cacheDisk();
         $lifetime = Config::integer('media.delivery.url_lifetime', 3600);
 
-        if (! $disk->isLocal() && $disk->providesTemporaryUrls()) {
+        if (! $encrypted && ! $disk->isLocal() && $disk->providesTemporaryUrls()) {
             return new RedirectResponse($disk->temporaryUrl($path, now()->addSeconds($lifetime)));
         }
 
-        return $disk->filesystem()->response($path, basename($path), [
+        $headers = [
             'Content-Type' => $contentType,
-            'Cache-Control' => "public, max-age={$lifetime}, immutable",
-        ]);
+            'Cache-Control' => $encrypted ? "private, max-age={$lifetime}" : "public, max-age={$lifetime}, immutable",
+        ];
+
+        if (! $disk->isLocal()) {
+            return $disk->filesystem()->response($path, basename($path), $headers);
+        }
+
+        $response = new BinaryFileResponse($disk->path($path), 200, $headers, public: false);
+        $file = $response->getFile();
+
+        $response->setEtag(hash('xxh128', implode('|', [$path, $file->getSize(), $file->getMTime()])));
+
+        $request = app()->bound('request') ? app('request') : null;
+
+        if ($request instanceof Request) {
+            $response->isNotModified($request);
+        }
+
+        return $response;
     }
 
     /**
@@ -1501,15 +1593,15 @@ class DirectStream
      */
     protected function imageStream(?callable $thumbnailUrl): array
     {
-        if ($this->thumbnails === null) {
+        $thumbnails = $this->thumbnails();
+
+        if ($thumbnails === null) {
             return [];
         }
 
         if ($thumbnailUrl === null) {
             throw new InvalidArgumentException('Streams with thumbnails need the URL of their image playlist.');
         }
-
-        $thumbnails = $this->thumbnails;
 
         return [sprintf(
             '#EXT-X-IMAGE-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS="%s",URI="%s"',

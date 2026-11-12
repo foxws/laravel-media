@@ -35,6 +35,7 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | `delivery.cache_path` | `MEDIA_DELIVERY_CACHE_PATH` | `media-segments` | The directory on that disk |
 | `delivery.url_lifetime` | `MEDIA_DELIVERY_URL_LIFETIME` | `3600` | Lifetime of signed and temporary URLs, and of cache headers |
 | `delivery.lock_timeout` | `MEDIA_DELIVERY_LOCK_TIMEOUT` | `120` | How long requests wait for a segment that's being packaged |
+| `delivery.rendition_lock_wait` | `MEDIA_DELIVERY_RENDITION_LOCK_WAIT` | `lock_timeout` | How long requests wait for a rendition segment that's being encoded, before answering 503 with `Retry-After`; keep it below your player's request timeout |
 | `delivery.index_store` | `MEDIA_DELIVERY_INDEX_STORE` | `cache` | Where probes and keyframe indexes are kept: `cache` or `database` |
 | `delivery.index_connection` | `MEDIA_DELIVERY_INDEX_CONNECTION` | the default connection | The connection of the `media_indexes` table |
 | `delivery.cache_store` | `MEDIA_DELIVERY_CACHE_STORE` | the default store | The cache store of the `cache` index store and segment locks |

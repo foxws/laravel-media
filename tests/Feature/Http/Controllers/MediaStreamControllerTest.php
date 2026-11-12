@@ -49,6 +49,16 @@ it('packages and serves segments', function () {
     $this->get('videos/1/3/index.m3u8')->assertNotFound();
 });
 
+it('answers conditional and range requests for segments', function () {
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"));
+
+    $etag = $this->get('videos/1/0/1.ts')->assertOk()->assertHeader('Accept-Ranges', 'bytes')->headers->get('ETag');
+
+    expect($etag)->toBeString();
+    $this->get('videos/1/0/1.ts', ['If-None-Match' => $etag])->assertStatus(304);
+    $this->get('videos/1/0/1.ts', ['Range' => 'bytes=0-3'])->assertStatus(206)->assertHeader('Content-Range', 'bytes 0-3/10');
+});
+
 it('links and serves the keys of encrypted streams', function () {
     MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()
         ->withEncryption(fn (int $period) => EncryptionKey::derive('secret', "video:{$video}:{$period}"), rotateEvery: 2));
@@ -213,7 +223,8 @@ it('queues the first segments of a track and the next ones after each fragment',
     $this->get('videos/1/0/video/1.m4s')->assertOk();
     $this->get('videos/1/dash.mpd')->assertOk();
 
-    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [0, 1] && $job->track === Track::Video);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [0] && $job->track === Track::Video);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [1] && $job->track === Track::Video);
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->segments === [2] && $job->track === Track::Video);
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->track === Track::Audio);
 });
