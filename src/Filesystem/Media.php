@@ -17,6 +17,8 @@ class Media
 
     protected ?TemporaryDirectory $temporaryDirectory = null;
 
+    protected ?string $versionKey = null;
+
     public function __construct(
         protected Disk $disk,
         protected string $path,
@@ -146,17 +148,23 @@ class Media
     }
 
     /**
-     * A key that changes when the file changes: its disk, path, size and modification time.
+     * A key that changes when the file changes: its disk, path, size and modification time. It's
+     * read once per instance, since every segment and index path of a request needs it and remote
+     * disks answer each lookup with a request; open the file again to see a newer version.
      */
     public function versionKey(): string
     {
+        if ($this->versionKey !== null) {
+            return $this->versionKey;
+        }
+
         try {
             $modified = $this->disk->lastModified($this->path);
         } catch (Throwable) {
             $modified = 0;
         }
 
-        return hash('xxh128', implode('|', [$this->disk->name(), $this->path, $this->size(), $modified]));
+        return $this->versionKey = hash('xxh128', implode('|', [$this->disk->name(), $this->path, $this->size(), $modified]));
     }
 
     /**

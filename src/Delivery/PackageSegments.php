@@ -7,15 +7,17 @@ namespace Foxws\Media\Delivery;
 use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
+use Foxws\Media\Exceptions\SegmentNotReadyException;
 use Foxws\Media\MediaFactory;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\Config;
 
 /**
  * Packages segments of a direct stream ahead of their requests, so they're cached by the time
- * the player asks for them. Segments that got cached in the meantime are skipped. With a ladder,
- * the variant is one of its renditions, encoded on request.
+ * the player asks for them. Segments that got cached in the meantime, or that a request is still
+ * packaging, are skipped. With a ladder, the variant is one of its renditions, encoded on request.
  */
 class PackageSegments implements ShouldBeUnique, ShouldQueue
 {
@@ -51,8 +53,21 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
             ->lookAhead(0);
 
         foreach ($this->segments as $segment) {
-            $stream->segment($this->variant, $segment, $this->track, $this->stream);
+            try {
+                $stream->segment($this->variant, $segment, $this->track, $this->stream);
+            } catch (SegmentNotReadyException) {
+                continue;
+            }
         }
+    }
+
+    /**
+     * How long the job stays unique: as long as packaging may hold a segment's lock, so a job lost
+     * with its worker doesn't keep its segments from being queued again.
+     */
+    public function uniqueFor(): int
+    {
+        return Config::integer('media.delivery.lock_timeout', 120);
     }
 
     public function uniqueId(): string

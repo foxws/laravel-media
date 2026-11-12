@@ -10,6 +10,7 @@ use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\MediaFactory;
 use Foxws\Media\Testing\FakeProbe;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -69,4 +70,27 @@ it('encodes the segments of a rendition', function () {
     expect(Storage::disk('segments')->exists($stream->segment(1, 1, Track::Video)))->toBeTrue();
     Media::assertRanTimes(Executable::FFMpeg, 1);
     Media::assertRan(Executable::FFMpeg, fn (array $arguments) => in_array('scale=-2:720', $arguments, true));
+});
+
+it('skips segments a request is still encoding', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 19)]);
+    config(['media.delivery.rendition_lock_wait' => 0]);
+    $ladder = new Ladder([new Rendition(720, 2800)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->toCache('segments')->withRenditions($ladder)->lookAhead(0);
+    $path = $stream->segment(1, 1, Track::Video);
+    Storage::disk('segments')->delete($path);
+    $lock = Cache::lock("media:segment:{$path}", 60);
+    $lock->get();
+
+    new PackageSegments('videos', 'video.mp4', [1, 2], Track::Video, 6.0, 'segments', renditions: $ladder, variant: 1)->handle(app(MediaFactory::class));
+    $lock->release();
+
+    expect(Storage::disk('segments')->exists($path))->toBeFalse()
+        ->and(Storage::disk('segments')->exists($stream->segment(1, 2, Track::Video)))->toBeTrue();
+});
+
+it('stays unique only as long as a segment can be locked', function () {
+    config(['media.delivery.lock_timeout' => 45]);
+
+    expect(new PackageSegments('videos', 'video.mp4', [1], Track::Video, 6.0, 'segments')->uniqueFor())->toBe(45);
 });

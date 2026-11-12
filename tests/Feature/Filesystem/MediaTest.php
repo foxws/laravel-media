@@ -101,12 +101,21 @@ it('fails when remote media does not exist', function () {
 
 it('has a version key that changes with the file', function () {
     Storage::fake('videos')->put('video.mp4', 'one');
+    $first = new Media(Disk::make('videos'), 'video.mp4', app(TemporaryDirectories::class))->versionKey();
+
+    Storage::disk('videos')->put('video.mp4', 'version two');
+
+    expect($first)->toMatch('/^[0-9a-f]{32}$/')
+        ->and(new Media(Disk::make('videos'), 'video.mp4', app(TemporaryDirectories::class))->versionKey())->not->toBe($first)
+        ->and(new Media(Disk::make('videos'), 'other.mp4', app(TemporaryDirectories::class))->versionKey())->not->toBe($first);
+});
+
+it('looks up the version of the file once', function () {
+    Storage::fake('videos')->put('video.mp4', 'one');
     $media = new Media(Disk::make('videos'), 'video.mp4', app(TemporaryDirectories::class));
     $first = $media->versionKey();
 
     Storage::disk('videos')->put('video.mp4', 'version two');
 
-    expect($first)->toMatch('/^[0-9a-f]{32}$/')
-        ->and($media->versionKey())->not->toBe($first)
-        ->and(new Media(Disk::make('videos'), 'other.mp4', app(TemporaryDirectories::class))->versionKey())->not->toBe($first);
+    expect($media->versionKey())->toBe($first);
 });

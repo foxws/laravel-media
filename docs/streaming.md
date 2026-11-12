@@ -84,6 +84,8 @@ use Foxws\Media\FFMpeg\ThumbnailsResult;
 
 HLS gets an `#EXT-X-IMAGE-STREAM-INF` image playlist and DASH a thumbnail tile adaptation set. Shaka Player reads both with `getThumbnails()`.
 
+Pass a closure, e.g. `withThumbnails(fn () => $video->thumbnails())`, to look them up only when a playlist, manifest or sheet needs them, since the stream definition runs for every segment request too.
+
 ## Chapters and markers
 
 ```php
@@ -98,6 +100,7 @@ use Foxws\Media\FFMpeg\Scene;
 
 - **In the playlists:** markers become `#EXT-X-DATERANGE` tags in HLS and an `EventStream` per class in DASH. Shaka Player reports both as `timelineregionadded` events.
 - **On the seek bar:** `chaptersUrl()` serves the chapters as WebVTT, for Shaka Player's `addChaptersTrack()`. Each chapter ends where the next one starts.
+- **Looked up when needed:** `withMarkers(fn () => $video->markers())` calls the closure the first time a playlist, manifest or the chapter track needs the markers, so segment requests skip the query.
 - **Other classes and gaps:** `chapterTrackFrom(['chapter', 'intro'], 'Main')` lists other marker classes as chapters, and fills the gaps between them with a cue titled `Main`, so the last chapter's title doesn't stay on screen until the end.
 
 ## Renditions on request
@@ -114,7 +117,7 @@ MediaStream::define('videos', fn (Video $video) => Media::fromDisk('videos')
 - **Sizes:** only renditions smaller than the source are offered; the source stays the top variant, copied as it is.
 - **Switching:** each rendition segment is cut where the source's segment starts and begins with a keyframe, so players switch between the source and its renditions at every segment, also when they pick a size on their own.
 - **Encoding:** H.264 in High profile, at a level that fits the size (4.2 up to 1080p), so manifests name the codec before anything is encoded. Every segment is encoded with the same settings and shares one initialization segment. The ladder's `hardware()`, or `media.delivery.hardware` (`MEDIA_DELIVERY_HARDWARE`, falling back to `media.ladder.hardware`), decodes and encodes on the GPU. Sources the GPU can't decode, such as AV1 or 10-bit video on many GPUs, are decoded on the CPU and uploaded to it. When the GPU can't be opened, renditions are encoded on the CPU, and cached apart from GPU-encoded ones.
-- **Cost:** the first request of a rendition segment waits for its encode, roughly a few seconds per segment on the CPU and much less on a GPU. Look-ahead encodes the next segments in the background, so playback keeps up once it's started.
+- **Cost:** the first request of a rendition segment waits for its encode, roughly a few seconds per segment on the CPU and much less on a GPU. Look-ahead encodes the next segments in the background, so playback keeps up once it's started. Requests that wait for another request's encode give up after `media.delivery.rendition_lock_wait` seconds with a 503 and `Retry-After`, so a slow encode doesn't hold a worker longer than the player waits.
 - **Limits:** fragmented streams only (CMAF HLS and DASH; `hlsUrl()` lists the opened files), video only (the audio track is shared), and trick play stays on the source.
 
 ## Trick play
@@ -127,7 +130,7 @@ Adds an I-frame playlist per video variant to CMAF HLS, and a trick mode adaptat
 
 ## Encryption
 
-Segments can be encrypted for each request, while the cache keeps them unencrypted and shared:
+Segments can be encrypted as they're served, while the cache keeps them unencrypted and shared. Each segment is encrypted once per key, into a copy next to the unencrypted one that later requests get as a file:
 
 ```php
 use Foxws\Media\Encryption\EncryptionKey;
@@ -180,7 +183,7 @@ Media::fromDisk('videos')->open(['movie.mkv', 'movie-audio.m4a'])->stream()->tra
 - **Where:** segments are kept on `media.delivery.cache_disk` under `media.delivery.cache_path`. That can be local storage, a RAM disk or S3. On disks with temporary URLs, segment requests redirect to one. Keep the disk private when streams are encrypted.
 - **Per file version:** segments are keyed by the disk, path, size and modification time of the source, so every viewer shares them and a replaced file gets new ones.
 - **One package per segment:** concurrent requests for the same segment package it once.
-- **Look-ahead:** after a segment is requested, the next `media.delivery.look_ahead` segments are packaged ahead in a `PackageSegments` job, so they're cached before the player asks. Set `look_ahead_via` to `defer` to package them after the response instead, or `null` to turn it off. Per stream: `lookAhead(4)`.
+- **Look-ahead:** after a segment is requested, the next `media.delivery.look_ahead` segments are packaged ahead in a `PackageSegments` job per segment, so they're cached before the player asks. Set `look_ahead_via` to `defer` to package them after the response instead, or `null` to turn it off. Per stream: `lookAhead(4)`.
 - **Probes:** each file is probed once per version, then read from the [index store](#the-index-store), so playlist and segment requests don't run ffprobe.
 - **Pruning:** schedule `media:prune` to delete old segments. `media:prune --older-than=0` empties the cache.
 

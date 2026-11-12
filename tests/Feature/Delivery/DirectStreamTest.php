@@ -17,6 +17,7 @@ use Foxws\Media\Encoding\VideoCodec;
 use Foxws\Media\Encryption\EncryptionKey;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\SegmentNotFoundException;
+use Foxws\Media\Exceptions\SegmentNotReadyException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\FFMpeg\Scene;
@@ -25,7 +26,9 @@ use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Support\Defer\DeferredCallbackCollection;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 
 beforeEach(function () {
@@ -173,7 +176,7 @@ it('encrypts each segment response with its period key and the sequence number a
     $response = $stream->segmentResponse(0, 2);
 
     $iv = str_pad(pack('J', 2), 16, "\0", STR_PAD_LEFT);
-    expect(openssl_decrypt((string) $response->getContent(), 'aes-128-cbc', EncryptionKey::derive('secret', 'video:1')->binary(), OPENSSL_RAW_DATA, $iv))->toBe($plain)
+    expect(openssl_decrypt(responseBody($response), 'aes-128-cbc', EncryptionKey::derive('secret', 'video:1')->binary(), OPENSSL_RAW_DATA, $iv))->toBe($plain)
         ->and($response->headers->get('Cache-Control'))->toContain('private');
 });
 
@@ -581,11 +584,11 @@ it('encrypts the initialization segment and fragments of a track as they are ser
     $init = $stream->initSegmentResponse(0, Track::Video);
     $fragment = $stream->segmentResponse(0, 1, Track::Video);
 
-    expect($init->getContent())->toBe(CommonEncryption::init($fragments['init'], $key))
+    expect(responseBody($init))->toBe(CommonEncryption::init($fragments['init'], $key))
         ->and($init->headers->get('Cache-Control'))->toContain('private')
         ->and($fragment->headers->get('Content-Type'))->toBe('video/mp4')
-        ->and($fragment->getContent())->not->toContain(str_repeat('x', 32))
-        ->and(decryptCenc((string) $fragment->getContent(), $key)['samples'])->toBe($samples);
+        ->and(responseBody($fragment))->not->toContain(str_repeat('x', 32))
+        ->and(decryptCenc(responseBody($fragment), $key)['samples'])->toBe($samples);
 });
 
 it('serves encrypted fragments itself instead of redirecting to the cache disk', function () {
@@ -1041,8 +1044,9 @@ it('queues the first segments of every dash track', function () {
 
     Media::fromDisk('videos')->open(['1080.mp4', '720.mp4'])->stream()->packageStart();
 
-    Bus::assertDispatchedTimes(PackageSegments::class, 3);
-    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Video && $job->segments === [0, 1]);
+    Bus::assertDispatchedTimes(PackageSegments::class, 6);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Video && $job->segments === [0]);
+    Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Video && $job->segments === [1]);
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '720.mp4' && $job->track === Track::Video);
     Bus::assertDispatched(PackageSegments::class, fn (PackageSegments $job) => $job->path === '1080.mp4' && $job->track === Track::Audio);
 });
@@ -1195,4 +1199,71 @@ it('decodes renditions on request on the cpu when the gpu cannot decode the sour
     expect($stream->renditions()[0]->ladder->hardware)->toBe(HardwareAcceleration::Vaapi)
         ->and($stream->renditions()[0]->ladder->hardwareDecoding)->toBeFalse()
         ->and($stream->renditions()[0]->inputArguments())->toBe(['-vaapi_device', '/dev/dri/renderD128']);
+});
+
+it('encrypts a segment once per key and serves the encrypted copy from the cache disk', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = fn (string $secret) => Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(0)
+        ->withEncryption(EncryptionKey::derive($secret, 'video'), fn () => 'key');
+    $encrypted = fn () => array_values(array_filter(Storage::disk('segments')->allFiles(), fn (string $path) => str_contains($path, '/encrypted-')));
+
+    $first = $stream('one')->segmentResponse(0, 1);
+    Storage::disk('segments')->put($encrypted()[0], 'cached');
+    $again = $stream('one')->segmentResponse(0, 1);
+    $stream('two')->segmentResponse(0, 1);
+
+    expect($first)->toBeInstanceOf(BinaryFileResponse::class)
+        ->and($first->headers->get('Cache-Control'))->toContain('private')
+        ->and(responseBody($again))->toBe('cached')
+        ->and($encrypted())->toHaveCount(2)
+        ->and(implode(',', $encrypted()))->not->toContain(EncryptionKey::derive('one', 'video')->key);
+});
+
+it('answers 503 when another request is still encoding a rendition segment', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    config(['media.delivery.rendition_lock_wait' => 0]);
+    $stream = fn () => Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(0)->withRenditions(new Ladder([new Rendition(720, 2800)]));
+    $path = $stream()->segment(1, 1, Track::Video);
+    Storage::disk('segments')->delete($path);
+    $lock = Cache::lock("media:segment:{$path}", 60);
+    $lock->get();
+
+    try {
+        $stream()->segment(1, 1, Track::Video);
+        $this->fail('The segment was packaged while it was locked.');
+    } catch (SegmentNotReadyException $exception) {
+        expect($exception->getStatusCode())->toBe(503)
+            ->and($exception->getHeaders())->toBe(['Retry-After' => 1]);
+    } finally {
+        $lock->release();
+    }
+
+    expect($stream()->segment(1, 1, Track::Video))->toBe($path);
+});
+
+it('looks up markers and thumbnails given as closures only when a playlist needs them', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $lookups = ['markers' => 0, 'thumbnails' => 0];
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(0)->fragmented()
+        ->withMarkers(function () use (&$lookups) {
+            $lookups['markers']++;
+
+            return [new Marker(8.5, title: 'Twist', class: 'highlight')];
+        })
+        ->withThumbnails(function () use (&$lookups) {
+            $lookups['thumbnails']++;
+
+            return thumbnailSheets();
+        });
+
+    $stream->segmentResponse(0, 0, Track::Video);
+    $before = $lookups;
+    $master = $stream->masterPlaylist(fn () => 'playlist', thumbnailUrl: fn () => 'thumbnails');
+    $stream->masterPlaylist(fn () => 'playlist', thumbnailUrl: fn () => 'thumbnails');
+
+    expect($before)->toBe(['markers' => 0, 'thumbnails' => 0])
+        ->and($master)->toContain('#EXT-X-IMAGE-STREAM-INF')
+        ->and(array_map(fn (Marker $marker) => $marker->title, $stream->markers()))->toBe(['Twist'])
+        ->and($stream->markers())->toHaveCount(1)
+        ->and($lookups)->toBe(['markers' => 1, 'thumbnails' => 1]);
 });

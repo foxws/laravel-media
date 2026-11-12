@@ -21,6 +21,8 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\Filesystem as Flysystem;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 uses(TestCase::class)->in(__DIR__);
 
@@ -157,6 +159,14 @@ function videoProbe(int $width = 1920, int $height = 1080, bool $audio = true, s
 function runs(PendingProcess $process, Executable $executable): bool
 {
     return is_array($process->command) && pathinfo((string) $process->command[0], PATHINFO_FILENAME) === $executable->value;
+}
+
+/**
+ * The body of a response, read from the file of a file response.
+ */
+function responseBody(Response $response): string
+{
+    return $response instanceof BinaryFileResponse ? (string) file_get_contents($response->getFile()->getPathname()) : (string) $response->getContent();
 }
 
 /**
