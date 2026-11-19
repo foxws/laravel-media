@@ -123,12 +123,16 @@ it('leaves the obu headers, frame headers and tile sizes of av1 readable', funct
 
     $segment = CommonEncryption::segment($track['init'], $track['media'], $key, '0|video|0');
     $decrypted = decryptCenc($segment, $key);
+    $clearBytes = 2 + strlen($header) + 1 + 2 + 8;
+    $protectedOffset = strpos($segment, substr($sample, 0, $clearBytes)) + $clearBytes;
 
     // Each tile protects its whole blocks at its end: 32 of 40 bytes, then 16 of 23.
     expect($decrypted['samples'])->toBe([$sample])
-        ->and($decrypted['subsamples'])->toBe([[[2 + strlen($header) + 1 + 2 + 8, 32], [7, 16]]])
-        ->and($segment)->toContain(substr($sample, 0, 2 + strlen($header) + 1 + 2 + 8))
-        ->and($segment)->not->toContain(str_repeat('a', 9));
+        ->and($decrypted['subsamples'])->toBe([[[$clearBytes, 32], [7, 16]]])
+        ->and($segment)->toContain(substr($sample, 0, $clearBytes))
+        ->and(substr($segment, $protectedOffset, 32))->not->toBe(str_repeat('a', 32))
+        ->and(substr($segment, $protectedOffset + 32, 7))->toBe(str_repeat('b', 7))
+        ->and(substr($segment, $protectedOffset + 39, 16))->not->toBe(str_repeat('b', 16));
 });
 
 it('refuses codecs whose frame headers have to stay readable', function () {
