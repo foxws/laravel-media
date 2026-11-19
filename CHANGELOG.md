@@ -2,6 +2,19 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.6.0 - 2026-11-19
+
+This release requires PHP 8.5 or newer. PHP 8.4 is no longer supported, and PHP 8.6 is now tested in CI. Stay on the previous version if you still run PHP 8.4.
+
+<!-- Release notes generated using configuration in .github/release.yml at ec7fa2e8fe70dba2fb5e60524cfed61f1afe5939 -->
+### What's Changed
+
+#### Other Changes
+
+* Drop PHP 8.4 and add PHP 8.6 by @francoism90 in https://github.com/foxws/laravel-media/pull/66
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.5.0...0.6.0
+
 ## 0.5.0 - 2026-11-12
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
