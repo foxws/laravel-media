@@ -5,7 +5,7 @@ metadata:
   group: media
   eyebrow: "Video · HLS/DASH · FFmpeg"
   desc: "Probe, encode, package and stream audio and video with ffmpeg on any Laravel disk."
-  requires: "PHP ^8.4"
+  requires: "PHP ^8.5"
   laravel: "13.x"
   runtime: "FFmpeg, FFprobe"
   licence: MIT
@@ -52,7 +52,7 @@ Both need files encoded for streaming: H.264 or HEVC with AAC, at a few sizes. A
 
 ## Requirements
 
-- PHP 8.4 or higher, with the OpenSSL extension
+- PHP 8.5 or higher, with the OpenSSL extension
 - Laravel 13
 - ffmpeg and ffprobe
 

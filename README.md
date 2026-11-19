@@ -20,7 +20,7 @@ See the [full documentation](https://foxws.nl/laravel-media): [Installation](htt
 
 ## Requirements
 
-- PHP 8.4 or higher, with the OpenSSL extension
+- PHP 8.5 or higher, with the OpenSSL extension
 - Laravel 13
 - ffmpeg and ffprobe
 - `league/flysystem-aws-s3-v3` for S3 disks
