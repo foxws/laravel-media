@@ -7,7 +7,7 @@ order: 1
 
 ## Requirements
 
-- PHP 8.4 or higher, with the OpenSSL extension
+- PHP 8.5 or higher, with the OpenSSL extension
 - Laravel 13
 - ffmpeg and ffprobe. Static builds work; tone mapping needs ffmpeg built with libzimg (`ffmpeg -filters | grep zscale` checks).
 - `league/flysystem-aws-s3-v3` when you read from or write to S3 disks
