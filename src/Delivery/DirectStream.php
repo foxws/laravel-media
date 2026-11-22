@@ -49,6 +49,11 @@ use function Illuminate\Support\defer;
  */
 class DirectStream
 {
+    /**
+     * Bump when encrypted segments change, e.g. their IVs.
+     */
+    protected const int ENCRYPTION_VERSION = 2;
+
     protected ?float $segmentDuration = null;
 
     protected ?Disk $cacheDisk = null;
@@ -1114,11 +1119,12 @@ class DirectStream
 
     /**
      * Where the encrypted copy of a cached file is kept: next to it, in a directory named by a hash of
-     * the key, which can't be turned back into the key.
+     * the key, which can't be turned back into the key. The hash includes a version of the encryption,
+     * so copies made by an older one aren't served.
      */
     protected function encryptedPath(string $path, EncryptionKey $key): string
     {
-        return dirname($path).'/encrypted-'.substr(hash('sha256', "{$key->key}|{$key->keyId}"), 0, 32).'/'.basename($path);
+        return dirname($path).'/encrypted-'.substr(hash('sha256', self::ENCRYPTION_VERSION."|{$key->key}|{$key->keyId}"), 0, 32).'/'.basename($path);
     }
 
     /**

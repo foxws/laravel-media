@@ -201,7 +201,8 @@ class PackagingBuilder
 
     /**
      * Encrypt the segments with AES (Common Encryption), using a new random key unless one is given.
-     * The raw key is written next to the segments as the key file, and HLS playlists point to it.
+     * The raw key is written next to the segments as the key file, private whenever a visibility
+     * is given, even a public one, and HLS playlists point to it.
      * Keep that disk private and serve the key through an authorized route or a short-lived signed
      * URL, or pass keyFile: null and keyUri to serve a stored key yourself. DASH manifests have no
      * key URI, so DASH players need the key themselves (e.g. Shaka Player's drm.clearKeys).
@@ -393,6 +394,7 @@ class PackagingBuilder
     {
         $spec = $this->spec();
         $output = $this->directories->create();
+        $keys = null;
 
         try {
             foreach ([...$spec->manifests(), ...array_map(fn (PackagingStream $stream): string => $stream->output, $spec->streams)] as $file) {
@@ -401,13 +403,19 @@ class PackagingBuilder
 
             $this->packager()->package($spec, $output, $this->timeout);
 
-            if ($spec->encryption?->keyFile !== null) {
-                $output->put($spec->encryption->keyFile, $spec->encryption->key->binary());
-            }
-
             $written = $this->exporter->export($output->path(), $this->disk(), $directory, $this->visibility, move: true);
+
+            // Exported on its own, so segments can be public without publishing their key.
+            if ($spec->encryption?->keyFile !== null) {
+                $keys = $this->directories->createCache();
+                $keys->put($spec->encryption->keyFile, $spec->encryption->key->binary());
+
+                $visibility = $this->visibility !== null ? 'private' : null;
+                $written = [...$written, ...$this->exporter->export($keys->path(), $this->disk(), $directory, $visibility, move: true)];
+            }
         } finally {
             $output->delete();
+            $keys?->delete();
         }
 
         $manifests = array_map(fn (string $manifest): string => ltrim("{$directory}/{$manifest}", '/'), $spec->manifests());

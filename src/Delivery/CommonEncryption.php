@@ -60,7 +60,8 @@ final class CommonEncryption
      * Encrypt the samples of a media segment and describe them in each track fragment with senc, saiz and saio boxes.
      *
      * @param  string  $init  The track's unencrypted initialization segment.
-     * @param  string  $context  Unique per track and segment under the key, e.g. "0|video|12", to derive the sample IVs from.
+     * @param  string  $context  Unique per track and segment, e.g. "0|video|12". The sample IVs are derived from it
+     *                           and the segment itself, so other content under the same key never reuses a keystream.
      *
      * @throws InvalidMediaException
      */
@@ -68,13 +69,16 @@ final class CommonEncryption
     {
         $track = self::track($init);
         $boxes = self::boxes($segment);
+        // The context repeats when a file is replaced or re-encoded, or a key is shared, and CTR
+        // can't reuse an IV for other plaintext, so the IVs depend on the plaintext too.
+        $seed = hash_hmac('sha256', implode('|', [$context, hash('sha256', $init), hash('sha256', $segment)]), $key->binary(), true);
         $sample = 0;
         $fragments = [];
         $samples = [];
 
         foreach ($boxes as $box) {
             if ($box['type'] === 'moof') {
-                $fragments[$box['offset']] = self::protectFragment($segment, $box['offset'], $box['size'], $track, $key->binary(), $context, $sample, $samples);
+                $fragments[$box['offset']] = self::protectFragment($segment, $box['offset'], $box['size'], $track, $key->binary(), $seed, $sample, $samples);
             }
         }
 
@@ -126,7 +130,7 @@ final class CommonEncryption
      *
      * @throws InvalidMediaException
      */
-    protected static function protectFragment(string $segment, int $start, int $size, array $track, string $key, string $context, int &$sample, array &$samples): string
+    protected static function protectFragment(string $segment, int $start, int $size, array $track, string $key, string $seed, int &$sample, array &$samples): string
     {
         $moof = substr($segment, $start, $size);
         $children = self::boxes($moof, 8);
@@ -147,7 +151,7 @@ final class CommonEncryption
                     throw InvalidMediaException::notFragmented();
                 }
 
-                $iv = substr(hash('xxh128', "{$context}|{$sample}", true), 0, self::IV_SIZE);
+                $iv = substr(hash_hmac('sha256', (string) $sample, $seed, true), 0, self::IV_SIZE);
                 [$samples[$position], $subsamples] = self::protectSample(substr($segment, $position, $length), $key, $iv, $track);
                 $entries[] = ['iv' => $iv, 'subsamples' => $subsamples];
                 $sample++;

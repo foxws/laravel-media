@@ -53,7 +53,7 @@ it('encrypts a sample whose ciphertext is the string zero', function () {
     $key = new EncryptionKey(str_repeat('0', 32), str_repeat('0', 32));
     $track = fragmentedTrack('mp4a', ['c']);
 
-    $segment = CommonEncryption::segment($track['init'], $track['media'], $key, '0|audio|564');
+    $segment = CommonEncryption::segment($track['init'], $track['media'], $key, '0|audio|878');
 
     expect(decryptCenc($segment, $key)['samples'])->toBe(['c'])
         ->and(mp4Boxes($segment)['mdat'])->toEndWith('0');
@@ -113,6 +113,18 @@ it('derives the same ivs for the same context only', function () {
 
     expect($encrypt('0|audio|1'))->toBe($encrypt('0|audio|1'))
         ->and($encrypt('0|audio|2'))->not->toBe($encrypt('0|audio|1'));
+});
+
+it('derives other ivs for other content under the same key and context', function () {
+    $key = EncryptionKey::generate();
+
+    $ivs = array_map(function (string $sample) use ($key): string {
+        $track = fragmentedTrack('mp4a', [$sample]);
+
+        return bin2hex(decryptCenc(CommonEncryption::segment($track['init'], $track['media'], $key, '0|audio|1'), $key)['ivs'][0]);
+    }, ['first file', 'other file']);
+
+    expect($ivs[0])->not->toBe($ivs[1]);
 });
 
 it('leaves the obu headers, frame headers and tile sizes of av1 readable', function () {
