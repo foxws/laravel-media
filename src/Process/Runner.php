@@ -30,7 +30,17 @@ class Runner
      *
      * @var list<string>
      */
-    protected const array SENSITIVE_OPTIONS = ['keys', 'key', 'key_id', 'pssh', 'protection_systems', 'raw_key', 'iv', 'decryption_key', 'aes_signing_key', 'aes_signing_iv', 'client_cert_private_key_password'];
+    protected const array SENSITIVE_OPTIONS = ['keys', 'key', 'key_id', 'pssh', 'protection_systems', 'raw_key', 'iv', 'decryption_key', 'aes_signing_key', 'aes_signing_iv', 'client_cert_private_key_password', 'encryption_key', 'encryption_keys', 'decryption_keys', 'cenc_decryption_key', 'cenc_decryption_keys', 'headers', 'cookies', 'audible_key', 'audible_iv', 'activation_bytes', 'cryptokey', 'password', 'passphrase'];
+
+    /**
+     * The credentials in a URL: "://user:password@".
+     */
+    protected const string URL_CREDENTIALS = '~://([^\s/@?#"]++)@~';
+
+    /**
+     * The query of a URL, which holds the signature of temporary URLs.
+     */
+    protected const string URL_QUERY = '~://[^\s?"]*+\?\K[^\s"]++~';
 
     /** @var array<int, \Illuminate\Contracts\Process\InvokedProcess> */
     protected array $running = [];
@@ -84,7 +94,14 @@ class Runner
             ));
         } catch (ProcessTimedOutException $exception) {
             $this->fail(ProcessFailedException::timedOut(
-                new Result($executable, $redacted, 124, $exception->result->output(), $exception->result->errorOutput(), (hrtime(true) - $startedAt) / 1e9),
+                new Result(
+                    $executable,
+                    $redacted,
+                    124,
+                    $this->redactOutput($exception->result->output(), $command),
+                    $this->redactUrls($exception->result->errorOutput()),
+                    (hrtime(true) - $startedAt) / 1e9,
+                ),
                 $timeout,
             ));
         }
@@ -93,8 +110,8 @@ class Runner
             executable: $executable,
             command: $redacted,
             exitCode: $exitCode,
-            output: $output,
-            errorOutput: $errorOutput,
+            output: $this->redactOutput($output, $command),
+            errorOutput: $this->redactUrls($errorOutput),
             duration: (hrtime(true) - $startedAt) / 1e9,
         );
 
@@ -227,7 +244,46 @@ class Runner
     }
 
     /**
-     * Hide the values of sensitive options, such as encryption keys.
+     * Hide the credentials and queries of every URL in the text, like the signatures of temporary URLs.
+     */
+    protected function redactUrls(string $text): string
+    {
+        if (! str_contains($text, '://')) {
+            return $text;
+        }
+
+        $text = preg_replace(self::URL_CREDENTIALS, '://[REDACTED]@', $text) ?? '[REDACTED]';
+
+        return preg_replace(self::URL_QUERY, '[REDACTED]', $text) ?? '[REDACTED]';
+    }
+
+    /**
+     * Hide the secrets of the command's URLs in its output, which ffprobe repeats as the file name.
+     * Only those, as the output is data: a URL in a file's tags stays as it is.
+     *
+     * @param  list<string>  $command
+     */
+    protected function redactOutput(string $output, array $command): string
+    {
+        if (! str_contains($output, '://')) {
+            return $output;
+        }
+
+        foreach ($command as $argument) {
+            if (preg_match(self::URL_CREDENTIALS, $argument, $credentials) === 1) {
+                $output = str_replace("://{$credentials[1]}@", '://[REDACTED]@', $output);
+            }
+
+            if (preg_match(self::URL_QUERY, $argument, $query) === 1) {
+                $output = str_replace("?{$query[0]}", '?[REDACTED]', $output);
+            }
+        }
+
+        return $output;
+    }
+
+    /**
+     * Hide the values of sensitive options, such as encryption keys, and the secrets in URLs.
      *
      * @param  list<string>  $command
      */
@@ -256,7 +312,7 @@ class Runner
             $argument = preg_replace("/^(-{1,2}(?:{$options}))=.+$/", '$1=[REDACTED]', $argument) ?? '[REDACTED]';
             $argument = preg_replace('/\\b(key_id|key)=[0-9a-fA-F]+/', '$1=[REDACTED]', $argument) ?? '[REDACTED]';
 
-            $redacted[] = $argument;
+            $redacted[] = $this->redactUrls($argument);
         }
 
         return implode(' ', array_map(fn (string $argument): string => str_contains($argument, ' ') ? escapeshellarg($argument) : $argument, $redacted));
