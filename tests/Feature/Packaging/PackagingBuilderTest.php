@@ -118,6 +118,16 @@ it('encrypts the segments and saves the raw key next to them', function () {
         ->scheme->toBe(ProtectionScheme::Cbcs);
 });
 
+it('keeps the key private when the segments are public', function () {
+    fakePackaging();
+    Storage::fake('streams');
+
+    Media::fromDisk('streams')->open('video.mp4')->exportAsHLS()->withEncryption()->withVisibility('public')->save('videos/1');
+
+    expect(Storage::disk('streams')->getVisibility('videos/1/master.m3u8'))->toBe('public')
+        ->and(Storage::disk('streams')->getVisibility('videos/1/key'))->toBe('private');
+})->skipOnWindows();
+
 it('leaves the key file out when the app serves the key itself', function () {
     $packager = fakePackaging();
     Storage::fake('streams');
