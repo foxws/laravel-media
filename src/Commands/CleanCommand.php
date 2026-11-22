@@ -33,7 +33,12 @@ class CleanCommand extends Command
 
         foreach ($this->roots() as $root) {
             foreach (array_map(fn (string $directory): string => str_replace('\\', '/', $directory), $filesystem->directories($root)) as $directory) {
-                if (preg_match('/^[0-9a-f]{16}$/', basename($directory)) !== 1 || $this->lastModified($directory) > $cutoff) {
+                // A link in a shared root could point anywhere, and deleting it would empty its target.
+                if (preg_match('/^[0-9a-f]{16}$/', basename($directory)) !== 1 || is_link($directory)) {
+                    continue;
+                }
+
+                if ($this->lastModified($directory) > $cutoff) {
                     continue;
                 }
 

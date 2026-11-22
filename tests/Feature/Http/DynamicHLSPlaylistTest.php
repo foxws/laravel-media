@@ -109,3 +109,37 @@ it('fails clearly without an opened or existing playlist', function () {
     expect(fn () => new DynamicHLSPlaylist('streams')->get())->toThrow(ManifestException::class, 'No manifest has been opened.')
         ->and(fn () => new DynamicHLSPlaylist('streams')->open('missing.m3u8')->get())->toThrow(ManifestException::class, "The manifest [missing.m3u8] doesn't exist");
 });
+
+it('refuses uris outside the directory of the opened playlist', function (string $uri) {
+    Storage::fake('streams');
+    Storage::disk('streams')->put('videos/1/master.m3u8', "#EXTM3U\n{$uri}\n");
+
+    $playlist = new DynamicHLSPlaylist('streams')->open('videos/1/master.m3u8')->resolveMediaUrlsUsing(fn (string $path) => $path);
+
+    expect(fn () => $playlist->get())->toThrow(ManifestException::class, 'outside of [videos/1]');
+})->with([
+    'sibling' => '../2/segment.ts',
+    'above the root' => '../../../../secret.ts',
+    'backslashes' => '..\\2\\segment.ts',
+    'same prefix' => '../10/segment.ts',
+]);
+
+it('refuses to open a playlist path that climbs out of its directory', function () {
+    Storage::fake('streams');
+    Storage::disk('streams')->put('videos/2/master.m3u8', "#EXTM3U\n");
+
+    $playlist = new DynamicHLSPlaylist('streams')->open('videos/1/../2/master.m3u8')->within('videos/1');
+
+    expect(fn () => $playlist->get())->toThrow(ManifestException::class);
+});
+
+it('resolves nested playlists within the given directory', function () {
+    Storage::fake('streams');
+    Storage::disk('streams')->put('videos/1/audio/main.m3u8', "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"../key\"\n");
+
+    $playlist = new DynamicHLSPlaylist('streams')->open('videos/1/audio/main.m3u8')
+        ->within('videos/1')
+        ->resolveKeyUrlsUsing(fn (string $path) => "signed:{$path}");
+
+    expect($playlist->get())->toContain('URI="signed:videos/1/key"');
+});

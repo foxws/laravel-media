@@ -60,6 +60,18 @@ it('leaves directories it did not create alone', function () {
     expect($other)->toBeDirectory();
 });
 
+it('does not follow a link to a directory elsewhere', function () {
+    $target = temporaryDirectoryAged("{$this->cache}/some-other-app", minutes: 9000);
+    new Filesystem()->ensureDirectoryExists($this->root);
+    symlink($target, "{$this->root}/0123456789abcdef");
+
+    $this->artisan('media:clean', ['--older-than' => 0])->assertSuccessful();
+
+    expect("{$target}/output.mp4")->toBeFile();
+
+    unlink("{$this->root}/0123456789abcdef");
+})->skipOnWindows();
+
 it('only lists what it would delete in a dry run', function () {
     $stale = temporaryDirectoryAged("{$this->root}/0123456789abcdef", minutes: 300);
 

@@ -41,3 +41,15 @@ it('fails clearly when a file cannot be written', function () {
     expect(fn () => $directory->put('concat.txt', 'list'))
         ->toThrow(TemporaryFileException::class, "Can't write the temporary file [{$file}/concat.txt]");
 });
+
+it('refuses paths that leave the directory', function (string $path) {
+    $directory = new TemporaryDirectory('/tmp/media/0123456789abcdef', new TemporaryDirectories('/tmp/media'));
+
+    expect(fn () => $directory->path($path))->toThrow(TemporaryFileException::class, 'must stay inside its directory');
+})->with([
+    'parent' => '../video.mp4',
+    'nested parent' => 'videos/../../video.mp4',
+    'backslashes' => 'videos\\..\\..\\video.mp4',
+    'only a parent' => '..',
+    'null byte' => "video\0.mp4",
+]);

@@ -64,6 +64,7 @@ public function __invoke(Request $request, Video $video, string $path): Response
 
     $manifest = str_ends_with($path, '.m3u8')
         ? $media->hlsPlaylist()
+            ->within("videos/{$video->id}")
             ->resolveKeyUrlsUsing(fn (string $key) => URL::temporarySignedRoute('videos.key', now()->addMinutes(10), [$video]))
             ->resolvePlaylistUrlsUsing(fn (string $playlist) => URL::temporarySignedRoute('videos.manifest', now()->addHours(4), [$video, Str::after($playlist, "videos/{$video->id}/")]))
             ->resolveMediaUrlsUsing(fn (string $file) => Storage::disk('streams')->temporaryUrl($file, now()->addHours(4)))

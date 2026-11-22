@@ -13,7 +13,9 @@ final readonly class Pad implements Filter
         public int $width,
         public int $height,
         public string $color = 'black',
-    ) {}
+    ) {
+        Color::validate($color);
+    }
 
     public function type(): FilterType
     {

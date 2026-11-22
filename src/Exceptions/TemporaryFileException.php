@@ -9,6 +9,11 @@ use Throwable;
 
 class TemporaryFileException extends RuntimeException
 {
+    public static function outsideDirectory(string $path): self
+    {
+        return new self("The path [{$path}] must stay inside its directory, so it can't contain \"..\".");
+    }
+
     public static function unwritable(string $path, ?Throwable $previous = null): self
     {
         return new self("Can't write the temporary file [{$path}]. Check the permissions and free space of the temporary root.", previous: $previous);

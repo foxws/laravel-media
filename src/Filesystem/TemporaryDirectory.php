@@ -21,10 +21,16 @@ final readonly class TemporaryDirectory implements Stringable
 
     /**
      * The full path of the directory, or of a file or folder inside it.
+     *
+     * @throws TemporaryFileException When the path would leave the directory.
      */
     public function path(string $path = ''): string
     {
         $path = trim(str_replace('\\', '/', $path), '/');
+
+        if (str_contains($path, "\0") || in_array('..', explode('/', $path), true)) {
+            throw TemporaryFileException::outsideDirectory($path);
+        }
 
         return $path === '' ? $this->root : "{$this->root}/{$path}";
     }

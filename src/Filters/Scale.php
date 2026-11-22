@@ -29,7 +29,7 @@ final readonly class Scale implements Filter
             'scale=%1$d:%2$d:force_original_aspect_ratio=decrease,pad=%1$d:%2$d:(ow-iw)/2:(oh-ih)/2:color=%3$s,setsar=1',
             $width,
             $height,
-            $color,
+            Color::validate($color),
         ));
     }
 

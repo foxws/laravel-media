@@ -8,6 +8,11 @@ use RuntimeException;
 
 class ManifestException extends RuntimeException
 {
+    public static function outsideDirectory(string $uri, string $directory): self
+    {
+        return new self("The manifest references [{$uri}], outside of [{$directory}]. Call within() with the directory of the whole stream if its manifests are nested.");
+    }
+
     public static function notOpened(): self
     {
         return new self('No manifest has been opened. Call open() with its path first.');
