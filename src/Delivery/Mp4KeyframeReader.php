@@ -22,6 +22,17 @@ final class Mp4KeyframeReader
     public const int MAX_MOOV_SIZE = 256 * 1024 * 1024;
 
     /**
+     * The most samples that are read into memory, about 9 hours at 60 frames per second. Counts
+     * come from the file, so a small one can claim billions.
+     */
+    public const int MAX_SAMPLES = 2_000_000;
+
+    /**
+     * The most child boxes read from one box; real files have a few dozen.
+     */
+    protected const int MAX_BOXES = 10_000;
+
+    /**
      * What editStart() returns for a track without an edit list.
      */
     protected const int NO_EDIT_LIST = -1;
@@ -108,7 +119,9 @@ final class Mp4KeyframeReader
                 return is_string($moov) && strlen($moov) === $boxSize - $headerSize ? $moov : null;
             }
 
-            if ($boxSize < $headerSize) {
+            // A box reaching the end of the file leaves no room for a moov box, and adding a 64-bit
+            // size that's larger than that could overflow.
+            if ($boxSize < $headerSize || $boxSize >= $fileSize - $offset) {
                 return null;
             }
 
@@ -157,6 +170,14 @@ final class Mp4KeyframeReader
         }
 
         $tables = self::children($moov, ...$stbl);
+
+        // Each starts with its version, flags and entry count, or is at least as long as that.
+        foreach (array_filter([$mdhd, $tables['stts'] ?? null, $tables['stss'] ?? null, $tables['ctts'] ?? null]) as [$start, $end]) {
+            if ($end - $start < 8) {
+                return null;
+            }
+        }
+
         $timescale = self::timescale($moov, $mdhd);
 
         // Without a sync sample table, or with an empty one, ffmpeg falls back on parsing the
@@ -213,7 +234,12 @@ final class Mp4KeyframeReader
             return self::NO_EDIT_LIST;
         }
 
-        [$start] = $elst;
+        [$start, $end] = $elst;
+
+        if ($end - $start < 8) {
+            return null;
+        }
+
         $version = ord($moov[$start]);
         /** @var array{1: int} $count */
         $count = unpack('N', $moov, $start + 4);
@@ -247,9 +273,22 @@ final class Mp4KeyframeReader
      */
     protected static function presentationTimes(string $moov, array $stts, ?array $ctts): ?array
     {
+        $composition = $ctts !== null ? self::entries($moov, $ctts) : [];
+        $decoding = self::entries($moov, $stts);
+
+        if ($composition === null || $decoding === null) {
+            return null;
+        }
+
+        foreach ([$composition, $decoding] as $table) {
+            if (array_sum(array_column($table, 0)) > self::MAX_SAMPLES) {
+                return null;
+            }
+        }
+
         $offsets = [];
 
-        foreach ($ctts !== null ? self::entries($moov, $ctts) : [] as [$count, $offset]) {
+        foreach ($composition as [$count, $offset]) {
             $offset = $offset >= 0x80000000 ? $offset - 0x100000000 : $offset;
 
             for ($i = 0; $i < $count; $i++) {
@@ -260,7 +299,7 @@ final class Mp4KeyframeReader
         $times = [];
         $time = 0;
 
-        foreach (self::entries($moov, $stts) as [$count, $delta]) {
+        foreach ($decoding as [$count, $delta]) {
             for ($i = 0; $i < $count; $i++) {
                 $times[] = $time + ($offsets[count($times)] ?? 0);
                 $time += $delta;
@@ -284,7 +323,7 @@ final class Mp4KeyframeReader
         $count = unpack('N', $moov, $start + 4);
         $length = min($count[1], intdiv($end - $start - 8, 4));
 
-        if ($length <= 0) {
+        if ($length <= 0 || $length > self::MAX_SAMPLES) {
             return [];
         }
 
@@ -295,12 +334,12 @@ final class Mp4KeyframeReader
     }
 
     /**
-     * The (count, value) pairs of an stts or ctts table.
+     * The (count, value) pairs of an stts or ctts table, or null when there are too many to read.
      *
      * @param  array{0: int, 1: int}  $box
-     * @return list<array{0: int, 1: int}>
+     * @return list<array{0: int, 1: int}>|null
      */
-    protected static function entries(string $moov, array $box): array
+    protected static function entries(string $moov, array $box): ?array
     {
         [$start, $end] = $box;
         /** @var array{1: int} $count */
@@ -309,6 +348,10 @@ final class Mp4KeyframeReader
 
         if ($length <= 0) {
             return [];
+        }
+
+        if ($length > self::MAX_SAMPLES) {
+            return null;
         }
 
         /** @var array<int, int> $values */
@@ -409,7 +452,7 @@ final class Mp4KeyframeReader
         $boxes = [];
         $offset = $start;
 
-        while ($offset + 8 <= $end) {
+        while ($offset + 8 <= $end && count($boxes) < self::MAX_BOXES) {
             /** @var array{1: int} $size */
             $size = unpack('N', $data, $offset);
             $type = substr($data, $offset + 4, 4);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Delivery;
 
+use Foxws\Media\Exceptions\InvalidMediaException;
 use InvalidArgumentException;
 
 /**
@@ -12,6 +13,12 @@ use InvalidArgumentException;
  */
 final readonly class KeyframeIndex
 {
+    /**
+     * The most segments a file is split into, a week of 6 second segments. Durations come from the
+     * file's header, so a small one can claim years.
+     */
+    public const int MAX_SEGMENTS = 100_000;
+
     /**
      * @param  list<float>  $keyframes  Keyframe timestamps in seconds, ascending. Empty for audio.
      */
@@ -45,6 +52,8 @@ final readonly class KeyframeIndex
      * long keyframe intervals get longer segments. Without keyframes (audio), segments are even.
      *
      * @return list<Segment>
+     *
+     * @throws InvalidMediaException
      */
     public function segments(float $target = 6.0): array
     {
@@ -54,6 +63,17 @@ final readonly class KeyframeIndex
 
         if ($this->duration <= 0) {
             return [];
+        }
+
+        // Every segment is at least the target long, and only as many as there are keyframes.
+        $most = $this->duration / $target;
+
+        if ($this->keyframes !== []) {
+            $most = min($most, count($this->keyframes));
+        }
+
+        if ($most > self::MAX_SEGMENTS) {
+            throw InvalidMediaException::tooLong($this->duration, $target, self::MAX_SEGMENTS);
         }
 
         $boundaries = $this->keyframes === [] ? $this->evenBoundaries($target) : $this->keyframeBoundaries($target);

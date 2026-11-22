@@ -22,4 +22,9 @@ class ManifestException extends RuntimeException
     {
         return new self("The manifest couldn't be processed: {$error}.");
     }
+
+    public static function tooManySegments(): self
+    {
+        return new self('The manifest has too many segments to list one by one.');
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Foxws\Media\Delivery\KeyframeIndex;
 use Foxws\Media\Delivery\Segment;
+use Foxws\Media\Exceptions\InvalidMediaException;
 
 it('reads the keyframes from ffprobe packets', function () {
     $index = KeyframeIndex::fromPackets("0.000000,K__\n0.033367,___\n4.004000,K__\nN/A,K__\n2.002000,K_D\n4.004000,K__\n", 10);
@@ -53,4 +54,12 @@ it('splits audio without keyframes into even segments', function () {
 it('has no segments without a duration and rejects a zero target', function () {
     expect(new KeyframeIndex([0], 0)->segments())->toBe([])
         ->and(fn () => new KeyframeIndex([0], 10)->segments(0))->toThrow(InvalidArgumentException::class);
+});
+
+it('refuses a duration that gives too many segments', function () {
+    expect(fn () => new KeyframeIndex([], 1e9)->segments(6))->toThrow(InvalidMediaException::class, 'too many to list');
+});
+
+it('splits a long duration with few keyframes', function () {
+    expect(new KeyframeIndex([0.0, 10.0], 1e9)->segments(6))->toHaveCount(2);
 });
