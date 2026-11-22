@@ -427,6 +427,7 @@ public function __invoke(Request $request, Video $video, string $path): Response
 
     $manifest = str_ends_with($path, '.m3u8')
         ? $media->hlsPlaylist()
+            ->within("videos/{$video->id}")
             ->resolveKeyUrlsUsing(fn (string $key) => URL::temporarySignedRoute('videos.key', now()->addMinutes(10), [$video]))
             ->resolvePlaylistUrlsUsing(fn (string $playlist) => URL::temporarySignedRoute('videos.manifest', now()->addHours(4), [$video, Str::after($playlist, "videos/{$video->id}/")]))
             ->resolveMediaUrlsUsing(fn (string $file) => Storage::disk('streams')->temporaryUrl($file, now()->addHours(4)))
@@ -445,6 +446,7 @@ public function __invoke(Request $request, Video $video, string $path): Response
   `all()` returns the master and every media playlist it references, keyed by disk path. `process($path)` rewrites one playlist.
 - **`dashManifest()`** rewrites `BaseURL`, `media` and `initialization`/`sourceURL` (`resolveInitUrlsUsing` falls back to the media resolver). Segment templates with `$Number$` are expanded into a segment list, because a template can't produce a different signed URL per segment. Query strings are escaped for XML.
 - Without a resolver, URIs stay as they are, and absolute URLs are never changed. Each path is resolved once per request.
+- Resolvers only get paths inside the opened manifest's directory; a URI or opened path that climbs out throws `ManifestException`. When manifests are nested (`audio/main.m3u8` linking to `../key`), call `within()` with the stream's directory.
 - Both are `Responsable` with the right content type, and also usable standalone: `new DynamicHLSPlaylist('streams')->open($path)`. Add cache headers yourself, and keep them shorter than the signed URLs' lifetime.
 
 ## Several outputs in one run

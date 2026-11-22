@@ -13,6 +13,7 @@ use Foxws\Media\Exceptions\InvalidFormatException;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\Exceptions\ProcessFailedException;
+use Foxws\Media\Exceptions\TemporaryFileException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\FFMpeg\Clip;
@@ -694,3 +695,13 @@ it('does not encode two passes on the gpu', function () {
         ->inFormat(Format::h264()->bitrate(2000)->twoPass())
         ->save('encoded.mp4');
 })->throws(InvalidFormatException::class, "can't be combined with hardware()");
+
+it('refuses to write an output outside the temporary directory', function () {
+    Storage::fake('videos');
+    $fake = Media::fake();
+
+    $builder = Media::fromDisk('videos')->open('video.mp4')->ffmpeg();
+
+    expect(fn () => $builder->save('captions/x\\..\\..\\..\\escaped.vtt'))->toThrow(TemporaryFileException::class)
+        ->and($fake->commands(Executable::FFMpeg))->toBe([]);
+});

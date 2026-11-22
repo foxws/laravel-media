@@ -29,6 +29,8 @@ abstract class Manifest implements Responsable
     /** @var array<string, array<string, string>> */
     protected array $resolved = [];
 
+    protected ?string $directory = null;
+
     public function __construct(Disk|Filesystem|string|null $disk = null)
     {
         $this->fromDisk($disk ?? Config::string('filesystems.default'));
@@ -58,6 +60,18 @@ abstract class Manifest implements Responsable
     public function open(string $path): static
     {
         $this->path = ltrim(str_replace('\\', '/', $path), '/');
+        $this->resolved = [];
+
+        return $this;
+    }
+
+    /**
+     * The directory on the disk the manifest's URIs must stay in, instead of the manifest's own,
+     * e.g. the stream's directory when opening "videos/1/audio/main.m3u8", which links to "../key".
+     */
+    public function within(string $directory): static
+    {
+        $this->directory = trim(str_replace('\\', '/', $directory), '/');
         $this->resolved = [];
 
         return $this;
@@ -108,15 +122,20 @@ abstract class Manifest implements Responsable
     }
 
     /**
-     * The disk path of a URI relative to the file that contains it.
+     * The disk path of a URI relative to the file that contains it. Resolvers sign what this
+     * returns, so it may not leave the manifest's directory.
+     *
+     * @throws ManifestException
      */
     protected function pathFrom(string $file, string $uri): string
     {
-        $uri = strtok($uri, '?#') ?: $uri;
+        // Flysystem reads backslashes as separators, so they count as separators here too.
+        $uri = str_replace('\\', '/', strtok($uri, '?#') ?: $uri);
+        $directory = $this->directory ?? $this->directoryOf($this->path ?? $file);
 
         $segments = [];
 
-        foreach (explode('/', (dirname($file) === '.' ? '' : dirname($file)).'/'.$uri) as $segment) {
+        foreach (explode('/', "{$this->directoryOf($file)}/{$uri}") as $segment) {
             if ($segment === '' || $segment === '.') {
                 continue;
             }
@@ -128,7 +147,20 @@ abstract class Manifest implements Responsable
             }
         }
 
-        return implode('/', $segments);
+        $path = implode('/', $segments);
+
+        if ($directory !== '' && ! str_starts_with($path, "{$directory}/")) {
+            throw ManifestException::outsideDirectory($uri, $directory);
+        }
+
+        return $path;
+    }
+
+    protected function directoryOf(string $file): string
+    {
+        $directory = dirname($file);
+
+        return $directory === '.' ? '' : trim($directory, '/');
     }
 
     /**
@@ -136,6 +168,11 @@ abstract class Manifest implements Responsable
      */
     protected function read(string $path): string
     {
+        // Opened paths often end in a route parameter, which could climb out of the stream's directory.
+        if (in_array('..', explode('/', $path), true)) {
+            throw ManifestException::outsideDirectory($path, $this->directory ?? $this->directoryOf($path));
+        }
+
         return $this->disk->get($path) ?? throw ManifestException::unreadable($path);
     }
 
