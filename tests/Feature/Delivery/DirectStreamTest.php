@@ -368,6 +368,18 @@ it('copies one track of a segment into fragmented mp4 and caches its initializat
     ]);
 });
 
+it('packages an init segment again when only its first segment is still cached', function () {
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
+    $stream->segment(0, 0, Track::Video);
+    $init = $stream->initSegment(0, Track::Video);
+    Storage::disk('segments')->delete($init);
+
+    expect($stream->initSegment(0, Track::Video))->toBe($init);
+    Storage::disk('segments')->assertExists($init);
+    Media::assertRanTimes(Executable::FFMpeg, 2);
+});
+
 it('copies only the first keyframe of a segment into the i-frames track', function () {
     Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
     $stream = Media::fromDisk('videos')->open('video.mp4')->stream();
@@ -973,6 +985,18 @@ it('queues the next segments that are not cached yet after a segment request', f
         && $job->segmentDuration === 6.0
         && $job->connection === 'redis'
         && $job->queue === 'media');
+});
+
+it('queues a segment once while its job is waiting', function () {
+    Bus::fake();
+    lookAheadOnQueue();
+    Media::fake(['video.mp4' => FakeProbe::video(duration: 13)]);
+    $stream = Media::fromDisk('videos')->open('video.mp4')->stream()->lookAhead(1);
+
+    $stream->packageAhead(0, 1, Track::Video);
+    $stream->packageAhead(0, 1, Track::Video);
+
+    Bus::assertDispatchedTimes(PackageSegments::class, 1);
 });
 
 it('looks no further than the last segment and dispatches nothing when all are cached', function () {

@@ -28,10 +28,20 @@ class PruneCommand extends Command
         $disk = Disk::make(Config::string('media.delivery.cache_disk', 'local'))->filesystem();
         $prefix = trim(Config::string('media.delivery.cache_path', 'media-segments'), '/');
 
-        $stale = array_values(array_filter(
+        $files = array_filter(
             $disk->allFiles($prefix),
-            fn (string $path): bool => in_array(pathinfo($path, PATHINFO_EXTENSION), ['ts', 'm4s', 'mp4', 'vtt'], true) && $disk->lastModified($path) <= $cutoff,
+            fn (string $path): bool => $this->isCached($path, $prefix) && in_array(pathinfo($path, PATHINFO_EXTENSION), ['ts', 'm4s', 'mp4', 'vtt'], true),
+        );
+
+        $stale = array_values(array_filter($files, fn (string $path): bool => $disk->lastModified($path) <= $cutoff));
+
+        // An init segment is written once, so it's older than segments packaged later, which need it.
+        $inUse = array_flip(array_map(
+            dirname(...),
+            array_filter(array_diff($files, $stale), fn (string $path): bool => str_ends_with($path, '.m4s')),
         ));
+
+        $stale = array_values(array_filter($stale, fn (string $path): bool => basename($path) !== 'init.mp4' || ! isset($inUse[dirname($path)])));
 
         if (! $this->option('dry-run')) {
             foreach (array_chunk($stale, 1000) as $paths) {
@@ -90,6 +100,15 @@ class PruneCommand extends Command
     }
 
     /**
+     * Whether the path is part of the segment cache. Without a cache path that's the whole disk, where
+     * only the directories named by a version key are the package's.
+     */
+    protected function isCached(string $path, string $prefix): bool
+    {
+        return $prefix !== '' || preg_match('#^[0-9a-f]{32}(/|$)#', $path) === 1;
+    }
+
+    /**
      * Local disks keep the directories of deleted segments; object storage has no real directories.
      */
     protected function deleteEmptyDirectories(string $prefix): void
@@ -100,7 +119,10 @@ class PruneCommand extends Command
             return;
         }
 
-        $directories = $disk->filesystem()->allDirectories($prefix);
+        $directories = array_values(array_filter(
+            $disk->filesystem()->allDirectories($prefix),
+            fn (string $directory): bool => $this->isCached($directory, $prefix),
+        ));
 
         usort($directories, fn (string $a, string $b): int => substr_count($b, '/') <=> substr_count($a, '/'));
 
