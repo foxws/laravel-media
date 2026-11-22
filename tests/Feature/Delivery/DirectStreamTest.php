@@ -307,6 +307,38 @@ it('offers the audio streams picked by position or language, leaving out codecs 
         ->and($stream->withAudioStreams([0])->masterPlaylist($playlistUrl))->toContain('NAME="eng"')->not->toContain('audio-1');
 });
 
+it('does not serve audio streams that are left out, cached or not', function () {
+    Media::fake(['movie.mkv' => FakeProbe::video(duration: 13, audioLanguages: ['eng', 'jpn'])]);
+    $open = fn () => Media::fromDisk('videos')->open('movie.mkv')->stream();
+
+    $open()->segment(0, 0, Track::Audio, 1);
+    $stream = $open()->withAudioStreams([0]);
+    $url = fn () => 'url';
+
+    expect(fn () => $stream->segment(0, 0, Track::Audio, 1))->toThrow(SegmentNotFoundException::class)
+        ->and(fn () => $stream->initSegment(0, Track::Audio, 1))->toThrow(SegmentNotFoundException::class)
+        ->and(fn () => $stream->mediaPlaylist(0, $url, Track::Audio, $url, 1))->toThrow(SegmentNotFoundException::class)
+        ->and($stream->segment(0, 0, Track::Audio))->toEndWith('/audio/0.m4s');
+
+    $encrypted = $open()->withAudioStreams([0])->withEncryption(EncryptionKey::generate());
+
+    expect(fn () => $encrypted->initSegmentResponse(0, Track::Audio, 1))->toThrow(SegmentNotFoundException::class);
+});
+
+it('keeps titles and languages of the file on their line of the playlist', function () {
+    $probe = FakeProbe::video(audioLanguages: ["en\"\r\ng"], subtitles: ["nl\nd"]);
+    $probe['streams'][1]['tags']['title'] = "English\"\n#EXT-X-STREAM-INF:BANDWIDTH=1\nhttps://other.test/video.m3u8\n\t#";
+    Media::fake(['movie.mkv' => $probe]);
+
+    $playlist = Media::fromDisk('videos')->open('movie.mkv')->stream()->withEmbeddedSubtitles()->fragmented()
+        ->masterPlaylist(fn () => 'track.m3u8', fn () => 'subtitle.m3u8');
+
+    $lines = explode("\n", $playlist);
+
+    expect($lines)->not->toContain('https://other.test/video.m3u8', '#EXT-X-STREAM-INF:BANDWIDTH=1')
+        ->and($playlist)->toContain('LANGUAGE="en\'  g"', 'LANGUAGE="nl d"');
+});
+
 it('copies a later audio stream into its own track', function () {
     Media::fake(['movie.mkv' => FakeProbe::video(duration: 13, audioLanguages: ['eng', 'jpn'])]);
     $stream = Media::fromDisk('videos')->open('movie.mkv')->stream();

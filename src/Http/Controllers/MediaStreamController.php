@@ -246,7 +246,7 @@ class MediaStreamController
             throw new InvalidSignatureException;
         }
 
-        $stream = $definition->resolve(Arr::except($route->parameters(), self::STREAM_PARAMETERS));
+        $stream = $definition->resolve(Arr::except($route->parameters(), self::STREAM_PARAMETERS), $route);
 
         if ($stream->isEncrypted()) {
             $stream->keyUrlsUsing(fn (int $period, int $variant): string => $this->url($request, $definition, 'key', ['variant' => $variant, 'period' => $period]))

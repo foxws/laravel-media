@@ -67,7 +67,7 @@ Embedded SubRip, MP4 text, ASS and WebVTT streams are converted to WebVTT once a
 Every audio stream of the first file with audio becomes an audio track, so players pick one by language, like Shaka Player's `preferredAudioLanguage`. The stream marked as default starts selected. Limit them by language or position:
 
 ```php
-->stream()->withAudioStreams(['eng', 'jpn']);
+->stream()->withAudioStreams(['eng', 'jpn']);   // requests for the other audio tracks get a 404
 ```
 
 Streams that fragmented MP4 can't carry, like TrueHD or DTS, are left out. MPEG-TS playlists carry the first audio stream only.

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Delivery\Marker;
 use Foxws\Media\Delivery\PackageSegments;
 use Foxws\Media\Delivery\Track;
 use Foxws\Media\Encryption\EncryptionKey;
@@ -48,6 +49,17 @@ it('packages and serves segments', function () {
     $this->get('videos/1/0/9.ts')->assertNotFound();
     $this->get('videos/1/3/index.m3u8')->assertNotFound();
 });
+
+it('lets only the viewer cache what it serves', function (string $uri) {
+    Storage::disk('videos')->put('captions.vtt', "WEBVTT\n");
+    MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4")->stream()
+        ->withSubtitles('captions.vtt')
+        ->withMarkers([new Marker(0, 5, 'Intro', 'chapter')]));
+
+    $cacheControl = (string) $this->get("videos/1/{$uri}")->assertOk()->headers->get('Cache-Control');
+
+    expect($cacheControl)->toContain('private')->not->toContain('public');
+})->with(['0/0.ts', '0/video/init.mp4', '0/video/0.m4s', 'subtitles/0.vtt', 'subtitles/0/cmaf.vtt', 'chapters.vtt']);
 
 it('answers conditional and range requests for segments', function () {
     MediaStream::define('videos', fn (string $video) => Media::fromDisk('videos')->open("video-{$video}.mp4"));

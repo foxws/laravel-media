@@ -7,6 +7,7 @@ use Foxws\Media\Delivery\StreamDefinition;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Tests\Fixtures\RoutableVideo;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 beforeEach(fn () => Media::fake());
@@ -42,6 +43,30 @@ it('keeps parameters that are already bound', function () {
 it('throws a 404 for records that do not exist', function () {
     new StreamDefinition('videos', fn (RoutableVideo $video) => Media::open('video.mp4'))->resolve(['video' => '10']);
 })->throws(NotFoundHttpException::class);
+
+it('scopes a child to its parent when the route does', function (string $uri, bool $scoped, bool $found) {
+    $route = new Route('GET', $uri, fn () => null);
+
+    if ($scoped) {
+        $route->scopeBindings();
+    }
+
+    $route->bind(Request::create('/owners/1/videos/7'));
+
+    // The fixture has no children, so a child only resolves when it isn't scoped. The resolver lists it first on purpose.
+    $definition = new StreamDefinition('videos', fn (RoutableVideo $video, RoutableVideo $owner) => Media::open('video.mp4'));
+    $resolve = fn () => $definition->resolve(['owner' => '1', 'video' => '7'], $route);
+
+    if ($found) {
+        expect($resolve())->toBeInstanceOf(DirectStream::class);
+    } else {
+        expect($resolve)->toThrow(NotFoundHttpException::class);
+    }
+})->with([
+    'unscoped' => ['owners/{owner}/videos/{video}', false, true],
+    'scopeBindings()' => ['owners/{owner}/videos/{video}', true, false],
+    'binding field' => ['owners/{owner}/videos/{video:id}', false, false],
+]);
 
 it('refuses resolvers that return anything else', function () {
     new StreamDefinition('videos', fn () => 'video.mp4')->resolve([]);

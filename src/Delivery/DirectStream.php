@@ -347,7 +347,7 @@ class DirectStream
     {
         return new Response($this->subtitleContents($subtitle, $timestampOffset), 200, [
             'Content-Type' => 'text/vtt; charset=utf-8',
-            'Cache-Control' => 'public, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
+            'Cache-Control' => 'private, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
         ]);
     }
 
@@ -567,7 +567,7 @@ class DirectStream
 
         return new Response($track->toWebVtt(), 200, [
             'Content-Type' => 'text/vtt; charset=utf-8',
-            'Cache-Control' => 'public, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
+            'Cache-Control' => 'private, max-age='.Config::integer('media.delivery.url_lifetime', 3600),
         ]);
     }
 
@@ -703,8 +703,8 @@ class DirectStream
             foreach ($this->audioLabels($streams) as $position => $label) {
                 $language = $streams[$position]->language;
 
-                $lines[] = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="'.str_replace('"', "'", $label).'"'
-                    .($language !== null && $language !== 'und' ? ',LANGUAGE="'.str_replace('"', '', $language).'"' : '')
+                $lines[] = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="'.$this->quoted($label).'"'
+                    .($language !== null && $language !== 'und' ? ',LANGUAGE="'.$this->quoted($language).'"' : '')
                     .',DEFAULT='.($position === $default ? 'YES' : 'NO').',AUTOSELECT=YES,URI="'.$playlistUrl($audio, Track::Audio, $position).'"';
             }
         }
@@ -749,6 +749,7 @@ class DirectStream
 
             $track ??= $this->probe($variant)->hasVideo() ? Track::Video : Track::Audio;
             $this->ensureTrack($variant, $track, $stream);
+            $this->ensureSelected($variant, $track, $stream);
             $this->ensureEncryptable($variant, $track, $stream);
 
             $map = $initUrl !== null
@@ -994,6 +995,8 @@ class DirectStream
             throw SegmentNotFoundException::forTrack($variant, $track?->name($stream) ?? 'ts');
         }
 
+        $this->ensureSelected($variant, $track, $stream);
+
         return $this->segmentPath($this->media($variant), $segment, $track, $stream, $rendition);
     }
 
@@ -1006,6 +1009,8 @@ class DirectStream
      */
     public function initSegment(int $variant, Track $track, int $stream = 0): string
     {
+        $this->ensureSelected($variant, $track, $stream);
+
         $media = $this->media($variant);
         $path = $this->initPath($media, $track, $stream, $this->rendition($variant));
 
@@ -1114,6 +1119,7 @@ class DirectStream
     protected function encryptedInitSegment(int $variant, Track $track, int $stream = 0): string
     {
         $this->ensureOneKey();
+        $this->ensureSelected($variant, $track, $stream);
         $this->ensureEncryptable($variant, $track, $stream);
 
         $key = $this->key();
@@ -1267,8 +1273,8 @@ class DirectStream
     /**
      * A file from a disk: a redirect to a temporary URL when the disk provides them, the file itself
      * from a local disk, with an ETag and range support (and X-Sendfile when the application trusts
-     * it), or streamed from other disks. Encrypted files are never redirected to and aren't cached by
-     * shared caches.
+     * it), or streamed from other disks. Only the viewer may cache them, as streams are authorized or
+     * signed per request. Encrypted files are never redirected to.
      */
     protected function fileResponse(string $path, string $contentType, ?Disk $disk = null, bool $encrypted = false): Response
     {
@@ -1281,7 +1287,7 @@ class DirectStream
 
         $headers = [
             'Content-Type' => $contentType,
-            'Cache-Control' => $encrypted ? "private, max-age={$lifetime}" : "public, max-age={$lifetime}, immutable",
+            'Cache-Control' => $encrypted ? "private, max-age={$lifetime}" : "private, max-age={$lifetime}, immutable",
         ];
 
         if (! $disk->isLocal()) {
@@ -1508,8 +1514,8 @@ class DirectStream
                 throw new InvalidArgumentException('Streams with subtitles need the URLs of their playlists.');
             }
 
-            $lines[] = '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="'.str_replace('"', "'", $subtitle->label).'"'
-                .($subtitle->language !== null && $subtitle->language !== 'und' ? ',LANGUAGE="'.str_replace('"', '', $subtitle->language).'"' : '')
+            $lines[] = '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="'.$this->quoted($subtitle->label).'"'
+                .($subtitle->language !== null && $subtitle->language !== 'und' ? ',LANGUAGE="'.$this->quoted($subtitle->language).'"' : '')
                 .',DEFAULT=NO,AUTOSELECT=YES,URI="'.$subtitleUrl($index).'"';
         }
 
@@ -1591,11 +1597,13 @@ class DirectStream
     }
 
     /**
-     * A value for a quoted-string attribute, which can't hold double quotes or line breaks.
+     * A value for a quoted-string attribute, which can't hold double quotes, line breaks or other
+     * control characters. Titles and languages come from the files, so this is all that keeps
+     * them from adding lines to a playlist.
      */
     protected function quoted(string $value): string
     {
-        return str_replace(['"', "\r", "\n"], ["'", ' ', ' '], $value);
+        return (string) preg_replace('/[\x00-\x1F\x7F]/', ' ', str_replace('"', "'", $value));
     }
 
     /**
@@ -1725,6 +1733,22 @@ class DirectStream
         $probe = $this->probe($variant);
 
         if ((($track->isVideo() ? $probe->videoStreams() : $probe->audioStreams())[$stream] ?? null) === null) {
+            throw SegmentNotFoundException::forTrack($variant, $track->name($stream));
+        }
+    }
+
+    /**
+     * Audio streams left out by withAudioStreams() aren't served either, as their URLs are guessable.
+     *
+     * @throws SegmentNotFoundException
+     */
+    protected function ensureSelected(int $variant, ?Track $track, int $stream): void
+    {
+        if ($this->audioSelection === null || $track !== Track::Audio) {
+            return;
+        }
+
+        if (! array_key_exists($stream, $this->audioStreams($variant))) {
             throw SegmentNotFoundException::forTrack($variant, $track->name($stream));
         }
     }
@@ -2029,7 +2053,7 @@ class DirectStream
 
     protected function xml(string $value): string
     {
-        return htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        return htmlspecialchars($value, ENT_XML1 | ENT_QUOTES | ENT_SUBSTITUTE | ENT_DISALLOWED, 'UTF-8');
     }
 
     /**
