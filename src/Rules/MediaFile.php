@@ -11,6 +11,8 @@ use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
 use Foxws\Media\Probe\Probe;
 use Foxws\Media\Probe\Prober;
+use Foxws\Media\Probe\Stream;
+use Foxws\Media\Probe\VideoStream;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Translation\PotentiallyTranslatedString;
 use SplFileInfo;
@@ -21,6 +23,11 @@ use SplFileInfo;
  */
 final class MediaFile implements ValidationRule
 {
+    /**
+     * The major brands of still images in MP4 containers: AVIF and HEIF.
+     */
+    protected const array IMAGE_BRANDS = ['avif', 'heic', 'heix', 'mif1'];
+
     protected bool $requiresVideo = false;
 
     protected bool $requiresAudio = false;
@@ -52,7 +59,7 @@ final class MediaFile implements ValidationRule
     }
 
     /**
-     * A file with a video stream (cover art doesn't count).
+     * A file with a video stream (cover art and still images don't count).
      */
     public static function video(): self
     {
@@ -161,16 +168,40 @@ final class MediaFile implements ValidationRule
         $audio = $probe->audioStream();
         $duration = $probe->duration();
 
+        // Upper limits and codecs apply to every stream, or a second one would get around them.
+        $videos = array_filter($probe->videoStreams(), fn (VideoStream $stream): bool => ! $stream->attachedPicture);
+
         return array_values(array_filter([
-            $this->requiresVideo && $video === null ? 'The :attribute must be a video.' : null,
+            $this->requiresVideo && ($video === null || $this->isStillImage($probe)) ? 'The :attribute must be a video.' : null,
             $this->requiresAudio && $audio === null ? 'The :attribute must contain audio.' : null,
             $this->minDuration !== null && $duration < $this->minDuration ? "The :attribute must be at least {$this->seconds($this->minDuration)} long." : null,
-            $this->maxDuration !== null && $duration > $this->maxDuration ? "The :attribute may not be longer than {$this->seconds($this->maxDuration)}." : null,
+            $this->maxDuration !== null && ($duration <= 0 || $duration > $this->maxDuration) ? "The :attribute may not be longer than {$this->seconds($this->maxDuration)}." : null,
             $video !== null && $this->tooSmall($video->width, $video->height) ? "The :attribute must be at least {$this->minWidth}×{$this->minHeight} pixels." : null,
-            $video !== null && $this->tooLarge($video->width, $video->height) ? "The :attribute may not be larger than {$this->maxWidth}×{$this->maxHeight} pixels." : null,
-            $video !== null && $this->videoCodecs !== [] && ! in_array($video->codecName, $this->videoCodecs, true) ? 'The :attribute must use one of these video codecs: '.implode(', ', $this->videoCodecs).'.' : null,
-            $audio !== null && $this->audioCodecs !== [] && ! in_array($audio->codecName, $this->audioCodecs, true) ? 'The :attribute must use one of these audio codecs: '.implode(', ', $this->audioCodecs).'.' : null,
+            array_any($videos, fn (VideoStream $stream): bool => $this->tooLarge($stream->width, $stream->height)) ? "The :attribute may not be larger than {$this->maxWidth}×{$this->maxHeight} pixels." : null,
+            $this->usesOtherCodecs($videos, $this->videoCodecs) ? 'The :attribute must use one of these video codecs: '.implode(', ', $this->videoCodecs).'.' : null,
+            $this->usesOtherCodecs($probe->audioStreams(), $this->audioCodecs) ? 'The :attribute must use one of these audio codecs: '.implode(', ', $this->audioCodecs).'.' : null,
         ]));
+    }
+
+    /**
+     * @param  array<int, Stream>  $streams
+     * @param  list<string>  $allowed
+     */
+    protected function usesOtherCodecs(array $streams, array $allowed): bool
+    {
+        return $allowed !== [] && array_any($streams, fn (Stream $stream): bool => ! in_array($stream->codecName, $allowed, true));
+    }
+
+    /**
+     * Whether ffprobe read the file as an image, which it reports as a video stream.
+     */
+    protected function isStillImage(Probe $probe): bool
+    {
+        $format = (string) $probe->format()->name;
+
+        return $format === 'image2'
+            || str_ends_with($format, '_pipe')
+            || in_array(trim((string) ($probe->format()->tags['major_brand'] ?? '')), self::IMAGE_BRANDS, true);
     }
 
     protected function probe(SplFileInfo $file): ?Probe
@@ -198,8 +229,8 @@ final class MediaFile implements ValidationRule
 
     protected function tooLarge(?int $width, ?int $height): bool
     {
-        return ($this->maxWidth !== null && ($width ?? 0) > $this->maxWidth)
-            || ($this->maxHeight !== null && ($height ?? 0) > $this->maxHeight);
+        return ($this->maxWidth !== null && ($width ?? PHP_INT_MAX) > $this->maxWidth)
+            || ($this->maxHeight !== null && ($height ?? PHP_INT_MAX) > $this->maxHeight);
     }
 
     protected function seconds(float $seconds): string

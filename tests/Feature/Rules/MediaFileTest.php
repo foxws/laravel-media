@@ -74,6 +74,54 @@ it('rejects files ffprobe cannot read, and values that are not files', function 
         ->and(mediaErrors(MediaFile::any(), 'not a file'))->toBe(['The upload must be a readable media file.']);
 });
 
+it('rejects still images as videos', function (string $format, array $tags) {
+    $probe = FakeProbe::video(duration: 0.04, codec: 'png', audio: false);
+    $probe['format'] = [...$probe['format'], 'format_name' => $format, 'tags' => $tags];
+    Media::fake(['*' => $probe]);
+
+    expect(mediaErrors(MediaFile::video()))->toBe(['The upload must be a video.']);
+})->with([
+    'image by extension' => ['image2', []],
+    'image by content' => ['png_pipe', []],
+    'avif' => ['mov,mp4,m4a,3gp,3g2,mj2', ['major_brand' => 'avif']],
+    'heic' => ['mov,mp4,m4a,3gp,3g2,mj2', ['major_brand' => 'heic']],
+]);
+
+it('rejects an unknown duration when there is a maximum', function () {
+    Media::fake(['*' => FakeProbe::video(duration: 0)]);
+
+    expect(mediaErrors(MediaFile::video()->maxDuration(600)))->toBe(['The upload may not be longer than 10 minutes.']);
+});
+
+it('rejects unknown dimensions when there is a maximum', function () {
+    $probe = FakeProbe::video();
+    unset($probe['streams'][0]['width'], $probe['streams'][0]['height']);
+    Media::fake(['*' => $probe]);
+
+    expect(mediaErrors(MediaFile::video()->maxDimensions(3840, 2160)))->toBe(['The upload may not be larger than 3840×2160 pixels.']);
+});
+
+it('applies the limits to every stream', function () {
+    $probe = FakeProbe::video(width: 640, height: 360);
+    $probe['streams'][] = ['index' => 2, 'codec_type' => 'video', 'codec_name' => 'mpeg4', 'width' => 8000, 'height' => 8000];
+    $probe['streams'][] = ['index' => 3, 'codec_type' => 'audio', 'codec_name' => 'truehd'];
+    Media::fake(['*' => $probe]);
+
+    expect(mediaErrors(MediaFile::video()->maxDimensions(1920, 1080)->videoCodecs(['h264'])->audioCodecs(['aac'])))->toBe([
+        'The upload may not be larger than 1920×1080 pixels.',
+        'The upload must use one of these video codecs: h264.',
+        'The upload must use one of these audio codecs: aac.',
+    ]);
+});
+
+it('leaves cover art out of the limits', function () {
+    $probe = FakeProbe::video(width: 640, height: 360);
+    $probe['streams'][] = ['index' => 2, 'codec_type' => 'video', 'codec_name' => 'mjpeg', 'width' => 3000, 'height' => 3000, 'disposition' => ['attached_pic' => 1]];
+    Media::fake(['*' => $probe]);
+
+    expect(mediaErrors(MediaFile::video()->maxDimensions(1920, 1080)->videoCodecs(['h264'])))->toBe([]);
+});
+
 it('probes the uploaded file itself', function () {
     $fake = Media::fake();
     $upload = UploadedFile::fake()->create('upload.mp4', 100);

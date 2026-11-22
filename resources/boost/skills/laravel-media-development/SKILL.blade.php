@@ -360,6 +360,7 @@ $request->validate([
 @endboostsnippet
 
 - Files ffprobe can't read, and values that aren't files, fail with "The :attribute must be a readable media file."
+- `video()` refuses still images. `maxDimensions()`, `videoCodecs()` and `audioCodecs()` apply to every stream of the file (cover art aside), and a maximum fails when ffprobe can't tell the duration or size.
 - Codec names are ffprobe's (`h264`, `hevc`, `av1`, `vp9`, `aac`, `opus`, ...). Keep the `file`/`max` rules too, so oversized uploads are rejected before probing.
 
 ## Packaging into HLS and DASH
