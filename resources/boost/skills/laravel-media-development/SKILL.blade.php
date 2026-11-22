@@ -61,7 +61,7 @@ $result->paths();  // every written path
 - `addArgs([...])` adds output options (for example `['-vf', 'scale=1280:-2']`), and `addInputArgs([...])` adds options placed before every input.
 - `clip()` seeks on the input, so it applies to every output. With `Format::copy()` the clip starts at the keyframe before `from`.
 - `beforeSaving(fn ($builder) => ...)` can still change the command. `afterSaving(fn ($builder, $result) => ...)` runs once, only after the files are on the target disk.
-- `command('out.mp4')` returns the full command line with keys redacted, without running it.
+- `command('out.mp4')` returns the full command line with keys and the secrets of URLs redacted, without running it. Logs, events, results and exceptions are redacted the same way, so use `$media->inputPath()` when you need a signed URL.
 - Temporary files, including downloaded remote inputs, are deleted after every queue job and at the end of each request. Call `$media->cleanupTemporaryFiles()` to free them earlier, for example between steps of a long job.
 
 ## Keyframes and segments

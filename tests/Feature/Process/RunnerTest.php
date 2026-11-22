@@ -106,6 +106,40 @@ it('hides encryption keys in the command it reports', function () {
     });
 });
 
+it('hides signed urls and credentials in the command, its output and the failure', function () {
+    fakeExecutable(Executable::FFMpeg);
+    $url = 'https://user:hunter2@storage.test/video.mp4?X-Amz-Credential=AKIA&X-Amz-Signature=SECRETSIG';
+    Process::fake(['*' => Process::result(output: "filename {$url}", errorOutput: "Error opening input file {$url}\nhttps://storage.test/next.mp4?token=OTHERSIG: Server returned 403", exitCode: 1)]);
+    Event::fake([ProcessStarted::class, ProcessFailed::class]);
+
+    try {
+        Runner::make()->run(Executable::FFMpeg, ['-headers', 'Authorization: Bearer TOKEN', '-encryption_key', '00112233', '-i', $url]);
+        $this->fail('The run should have failed.');
+    } catch (ProcessFailedException $exception) {
+        $reported = $exception->getMessage().$exception->result->output.json_encode($exception->context());
+
+        foreach (['hunter2', 'SECRETSIG', 'AKIA', 'OTHERSIG', 'TOKEN', '00112233'] as $secret) {
+            expect($reported)->not->toContain($secret);
+        }
+
+        expect($exception->reason)->toBe(FailureReason::PermissionDenied)
+            ->and($reported)->toContain('[REDACTED]@storage.test');
+    }
+
+    Event::assertDispatched(ProcessStarted::class, fn (ProcessStarted $event) => ! str_contains($event->command, 'SECRETSIG') && ! str_contains($event->command, 'TOKEN'));
+});
+
+it('hides the signed url ffprobe repeats, and keeps the urls in tags', function () {
+    fakeExecutable(Executable::FFProbe);
+    $url = 'https://storage.test/video.mp4?signature=SECRETSIG';
+    $tag = 'https://videos.test/watch?v=abc';
+    Process::fake(['*' => Process::result(output: (string) json_encode(['filename' => $url, 'comment' => $tag], JSON_UNESCAPED_SLASHES))]);
+
+    expect(Runner::make()->run(Executable::FFProbe, [$url])->output)
+        ->not->toContain('SECRETSIG')
+        ->toContain('video.mp4?[REDACTED]', $tag);
+});
+
 it('streams standard output to the output callback', function () {
     fakeExecutable(Executable::FFMpeg);
     Process::fake(['*' => Process::result(output: "first\nsecond\n", errorOutput: 'warning')]);

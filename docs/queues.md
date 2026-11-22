@@ -68,7 +68,7 @@ public function handle(): void
 ```
 
 - Network errors, timeouts and full disks are retryable. Broken files, missing codecs and invalid options fail the same way every time.
-- Reported exceptions include the exit code, the redacted command and the last lines of ffmpeg's output, so they're readable in Sentry, Flare or Nightwatch.
+- Reported exceptions include the exit code, the redacted command and the last lines of ffmpeg's output without keys or URL signatures, so they're readable in Sentry, Flare or Nightwatch.
 - Give long encodes a `timeout()` below the job's `$timeout`, so ffmpeg is stopped and the job fails with a retryable timeout instead of the worker being killed.
 - Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to log the warnings of runs that succeeded, for example to see why output from a damaged file looks wrong.
 

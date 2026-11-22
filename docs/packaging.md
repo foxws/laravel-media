@@ -49,7 +49,7 @@ $key = $result->encryptionKey();  // store $key->keyId and encrypt($key->key)
 
 - Segments are encrypted with Common Encryption (`cenc`). HLS playlists point at the raw key, saved next to them as `key`. Keep it private and serve it through an authorized route; `withEncryption(keyFile: null, keyUri: route('videos.key', $video))` points the playlists at your route instead.
 - DASH manifests name the key ID but have no license URL, so DASH players need the key in their ClearKey configuration.
-- Keys are redacted from commands, logs and events.
+- Keys are redacted from commands, logs and events, as are the credentials and queries of URLs, like signed URLs.
 
 ## Serving private files with signed URLs
 
