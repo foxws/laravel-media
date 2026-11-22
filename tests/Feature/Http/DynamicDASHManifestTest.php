@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foxws\Media\Exceptions\ManifestException;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Http\DynamicDASHManifest;
 use Illuminate\Http\Request;
@@ -53,3 +54,14 @@ it('responds with the dash content type', function () {
 
     expect($response->headers->get('Content-Type'))->toBe('application/dash+xml');
 });
+
+it('refuses templates that expand into too much', function (string $media, string $repeat) {
+    Storage::fake('streams');
+    Storage::disk('streams')->put('manifest.mpd', "<SegmentTemplate media=\"{$media}\"><SegmentTimeline><S d=\"1\" r=\"{$repeat}\"/></SegmentTimeline></SegmentTemplate>");
+
+    expect(fn () => new DynamicDASHManifest('streams')->open('manifest.mpd')->get())->toThrow(ManifestException::class, 'too many segments');
+})->with([
+    'segments' => ['$Number$.m4s', '50000000'],
+    'overflowing repeat' => ['$Number$.m4s', '9223372036854775807'],
+    'bytes' => [str_repeat('a', 5000).'$Number$.m4s', '9999'],
+]);

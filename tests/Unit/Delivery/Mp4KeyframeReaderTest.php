@@ -68,3 +68,27 @@ it('leaves files to ffprobe that it cannot read exactly like ffprobe', function 
 it('leaves files it cannot open to ffprobe', function () {
     expect(Mp4KeyframeReader::read(sys_get_temp_dir().'/missing-'.uniqid().'.mp4'))->toBeNull();
 });
+
+it('leaves tables that claim too many samples to ffprobe', function (string $table) {
+    $file = mp4File(samples: 4, offsets: [0, 0, 0, 0]);
+    $position = strpos($file, $table);
+
+    expect(readMp4Keyframes(substr_replace($file, pack('N', 0xFFFFFFFF), $position + 12, 4)))->toBeNull();
+})->with(['stts', 'ctts']);
+
+it('leaves truncated tables to ffprobe', function (string $table) {
+    $file = mp4File(samples: 4, sync: [1], edits: [[0, 0x00010000]]);
+    $position = strpos($file, $table) - 4;
+    $size = unpack('N', $file, $position)[1];
+
+    // An empty table, and a free box in the rest of its space.
+    $file = substr_replace($file, pack('N', 8).$table.pack('N', $size - 8).'free', $position, 16);
+
+    expect(readMp4Keyframes($file))->toBeNull();
+})->with(['stts', 'stss', 'mdhd', 'elst']);
+
+it('leaves a box with an overflowing size to ffprobe', function () {
+    $file = mp4Box('ftyp', 'isom'.pack('N', 0)).pack('N', 1).'mdat'.pack('J', PHP_INT_MAX);
+
+    expect(readMp4Keyframes($file))->toBeNull();
+});

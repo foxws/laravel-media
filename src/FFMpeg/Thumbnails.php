@@ -30,6 +30,11 @@ class Thumbnails
     use HasSaveCallbacks;
     use ReportsProgress;
 
+    /**
+     * The most thumbnails one video is sampled into. Durations come from the file's header.
+     */
+    public const int MAX_THUMBNAILS = 100_000;
+
     protected ?float $every = null;
 
     protected int $count = 100;
@@ -224,6 +229,11 @@ class Thumbnails
         $this->runBeforeSavingCallbacks();
 
         $interval = $this->interval($duration);
+
+        if ($duration / $interval > self::MAX_THUMBNAILS) {
+            throw InvalidMediaException::tooLong($duration, $interval, self::MAX_THUMBNAILS);
+        }
+
         $count = (int) ceil($duration / $interval);
         [$columns, $rows] = $this->fittedGrid($count);
         $sheets = (int) ceil($count / ($columns * $rows));

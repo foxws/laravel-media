@@ -49,6 +49,11 @@ class InvalidMediaException extends RuntimeException
         return new self('ffmpeg did not write a fragmented MP4 segment with an initialization segment.');
     }
 
+    public static function tooLong(float $duration, float $interval, int $limit): self
+    {
+        return new self("A duration of {$duration} seconds in steps of {$interval} gives more than {$limit}, which is too many to list. The file's duration may be wrong.");
+    }
+
     public static function noStreams(): self
     {
         return new self('Add at least one stream to package, e.g. with addStreamsFrom().');

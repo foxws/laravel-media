@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Foxws\Media\Http;
 
+use Foxws\Media\Exceptions\ManifestException;
+
 /**
  * Rewrites a DASH manifest per request so segments and init segments can point to their own
  * (signed) URL. Segment templates with $Number$ are expanded into segment lists, because a
@@ -11,6 +13,16 @@ namespace Foxws\Media\Http;
  */
 class DynamicDASHManifest extends Manifest
 {
+    /**
+     * The most segments the templates of a manifest are expanded into. A short "r" can claim billions.
+     */
+    public const int MAX_SEGMENTS = 100_000;
+
+    /**
+     * The most bytes the expanded templates may add up to, as each segment repeats its template.
+     */
+    protected const int MAX_EXPANDED_BYTES = 32 * 1024 * 1024;
+
     /**
      * Resolve segment and BaseURL URIs, e.g. to temporary URLs.
      *
@@ -71,7 +83,9 @@ class DynamicDASHManifest extends Manifest
      */
     protected function expandSegmentTemplates(string $manifest): string
     {
-        return $this->replace('/<SegmentTemplate\s+([^>]*?)\s*(?:\/>|>(.*?)<\/SegmentTemplate>)/s', function (array $matches): string {
+        [$total, $bytes] = [0, 0];
+
+        return $this->replace('/<SegmentTemplate\s+([^>]*?)\s*(?:\/>|>(.*?)<\/SegmentTemplate>)/s', function (array $matches) use (&$total, &$bytes): string {
             $attributes = $matches[1];
             $timeline = preg_match('/<SegmentTimeline>.*?<\/SegmentTimeline>/s', $matches[2] ?? '', $timelineMatch) === 1 ? $timelineMatch[0] : null;
             $media = preg_match('/\bmedia="([^"]+)"/', $attributes, $mediaMatch) === 1 ? $mediaMatch[1] : '';
@@ -96,6 +110,18 @@ class DynamicDASHManifest extends Manifest
 
                 if ($duration === null) {
                     continue;
+                }
+
+                // Compared without adding up, as a repeat of PHP_INT_MAX would overflow.
+                if ($repeat >= self::MAX_SEGMENTS - $total) {
+                    throw ManifestException::tooManySegments();
+                }
+
+                $total += $repeat + 1;
+                $bytes += ($repeat + 1) * (strlen($media) + strlen($duration) + 40);
+
+                if ($bytes > self::MAX_EXPANDED_BYTES) {
+                    throw ManifestException::tooManySegments();
                 }
 
                 for ($index = 0; $index <= $repeat; $index++) {

@@ -7,6 +7,7 @@ use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\Facades\Media;
 use Foxws\Media\Filters\Tonemap;
+use Foxws\Media\Testing\FakeProbe;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
@@ -202,4 +203,12 @@ it('passes its context to the export events', function () {
     Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->withContext(['video_id' => 7])->save('storyboard');
 
     Event::assertDispatched(ExportCompleted::class, fn (ExportCompleted $event) => $event->context === ['video_id' => 7]);
+});
+
+it('refuses a duration that gives too many thumbnails', function () {
+    Storage::fake('videos');
+    $fake = Media::fake(['*' => FakeProbe::video(duration: 1e9)]);
+
+    expect(fn () => Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(5)->save('storyboard'))->toThrow(InvalidMediaException::class)
+        ->and($fake->commands(Executable::FFMpeg))->toBe([]);
 });
