@@ -62,13 +62,30 @@ class TemporaryDirectories
         unset($this->directories[$directory->path()]);
     }
 
-    public function deleteAll(): void
+    /**
+     * @param  list<string>  $except  The paths of directories to keep, e.g. those of the job a nested one runs in.
+     */
+    public function deleteAll(array $except = []): void
     {
-        foreach ($this->directories as $directory) {
-            new Filesystem()->deleteDirectory($directory->path());
-        }
+        foreach ($this->directories as $path => $directory) {
+            if (in_array($path, $except, true)) {
+                continue;
+            }
 
-        $this->directories = [];
+            new Filesystem()->deleteDirectory($directory->path());
+
+            unset($this->directories[$path]);
+        }
+    }
+
+    /**
+     * The paths of the directories that haven't been deleted.
+     *
+     * @return list<string>
+     */
+    public function paths(): array
+    {
+        return array_keys($this->directories);
     }
 
     protected function makeDirectory(string $root): TemporaryDirectory

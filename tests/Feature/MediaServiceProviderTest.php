@@ -10,6 +10,7 @@ use Foxws\Media\Tests\Fixtures\AddOnExecutable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Support\Facades\Artisan;
@@ -24,6 +25,35 @@ it('deletes temporary directories after every queue job', function (Closure $eve
     'processed' => [fn (Job $job) => new JobProcessed('redis', $job)],
     'exception' => [fn (Job $job) => new JobExceptionOccurred('redis', $job, new RuntimeException('Failed'))],
 ]);
+
+it('keeps the directories of the job a nested job runs in', function () {
+    [$outer, $inner] = [Mockery::mock(Job::class, ['payload' => []]), Mockery::mock(Job::class, ['payload' => []])];
+    $directories = app(TemporaryDirectories::class);
+
+    event(new JobProcessing('redis', $outer));
+    $ofOuter = $directories->create();
+    event(new JobProcessing('sync', $inner));
+    $ofInner = $directories->create();
+    event(new JobProcessed('sync', $inner));
+
+    expect($ofInner->path())->not->toBeDirectory()
+        ->and($ofOuter->path())->toBeDirectory();
+
+    event(new JobProcessed('redis', $outer));
+
+    expect($ofOuter->path())->not->toBeDirectory();
+});
+
+it('cleans up in the application that terminates, like an octane sandbox', function () {
+    $base = app();
+    $base->forgetInstance(TemporaryDirectories::class);
+    $sandbox = clone $base;
+    $directory = $sandbox->make(TemporaryDirectories::class)->create();
+
+    $sandbox->terminate();
+
+    expect($directory->path())->not->toBeDirectory();
+});
 
 it('keeps temporary directories after jobs when cleanup is turned off', function () {
     config(['media.temporary_files.cleanup_after_jobs' => false]);

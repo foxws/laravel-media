@@ -54,6 +54,29 @@ it('only touches segments in the cache path', function () {
     Storage::disk('segments')->assertExists([$other, $notSegment]);
 });
 
+it('keeps the init segment that newer segments need', function () {
+    $init = cachedSegment('media-segments/aaaa/6/video/init.mp4', minutes: 20000);
+    $stale = cachedSegment('media-segments/aaaa/6/video/0.m4s', minutes: 20000);
+    $recent = cachedSegment('media-segments/aaaa/6/video/1.m4s', minutes: 60);
+
+    $this->artisan('media:prune')->assertSuccessful();
+
+    Storage::disk('segments')->assertExists([$init, $recent]);
+    Storage::disk('segments')->assertMissing($stale);
+});
+
+it('only touches version directories without a cache path', function () {
+    config(['media.delivery.cache_path' => '']);
+    $other = cachedSegment('uploads/holiday.mp4', minutes: 99999);
+    $stale = cachedSegment(str_repeat('a', 32).'/6/0.ts', minutes: 99999);
+    Storage::disk('segments')->makeDirectory('empty');
+
+    $this->artisan('media:prune')->assertSuccessful();
+
+    Storage::disk('segments')->assertExists([$other, 'empty']);
+    Storage::disk('segments')->assertMissing($stale);
+});
+
 it('only counts what it would delete in a dry run', function () {
     $stale = cachedSegment('media-segments/aaaa/6/0.ts', minutes: 120);
 

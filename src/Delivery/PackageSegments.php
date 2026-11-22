@@ -80,6 +80,7 @@ class PackageSegments implements ShouldBeUnique, ShouldQueue
             $this->segmentDuration,
             $this->cacheDisk,
             $this->variant,
+            serialize($this->renditions),
         ]));
     }
 }

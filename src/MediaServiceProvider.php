@@ -20,15 +20,18 @@ use Foxws\Media\Packaging\PackagerManager;
 use Foxws\Media\Probe\Prober;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\ServiceProvider;
 use Psr\Log\LoggerInterface;
+use WeakMap;
 
 class MediaServiceProvider extends ServiceProvider
 {
@@ -77,7 +80,8 @@ class MediaServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->app->terminating(fn () => $this->app->make(TemporaryDirectories::class)->deleteAll());
+        // Injected by the application that terminates: under Octane that's the request's sandbox, not $this->app.
+        $this->app->terminating(fn (TemporaryDirectories $directories) => $directories->deleteAll());
 
         $this->cleanUpAfterQueueJobs();
         $this->registerRouteMacro();
@@ -130,16 +134,24 @@ class MediaServiceProvider extends ServiceProvider
 
     /**
      * Queue workers don't terminate between jobs, so delete each job's temporary directories when
-     * it finishes. When a job times out, the worker kills itself right after, so stop the running
+     * it finishes, keeping those that existed when it started: a job run with dispatchSync()
+     * finishes inside one that still uses them. When a job times out, the worker kills itself right after, so stop the running
      * ffmpeg first, which would otherwise keep running as an orphan.
      */
     protected function cleanUpAfterQueueJobs(): void
     {
         $events = $this->app->make('events');
 
-        $events->listen([JobProcessed::class, JobExceptionOccurred::class], function (): void {
+        /** @var WeakMap<Job, list<string>> $existing */
+        $existing = new WeakMap;
+
+        $events->listen(JobProcessing::class, function (JobProcessing $event) use ($existing): void {
+            $existing[$event->job] = app(TemporaryDirectories::class)->paths();
+        });
+
+        $events->listen([JobProcessed::class, JobExceptionOccurred::class], function (JobProcessed|JobExceptionOccurred $event) use ($existing): void {
             if (Config::boolean('media.temporary_files.cleanup_after_jobs', true)) {
-                $this->app->make(TemporaryDirectories::class)->deleteAll();
+                app(TemporaryDirectories::class)->deleteAll($existing[$event->job] ?? []);
             }
         });
 

@@ -28,7 +28,6 @@ use Foxws\Media\Probe\VideoStream;
 use Foxws\Media\Process\Runner;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Filesystem\Filesystem;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use InvalidArgumentException;
@@ -937,6 +936,20 @@ class DirectStream
             return $path;
         }
 
+        return $this->packageSegment($variant, $index, $track, $stream, $path, $path);
+    }
+
+    /**
+     * Package a segment under its lock, unless the file that's needed from it got written meanwhile.
+     *
+     * @param  string  $needed  The segment's own path, or that of the initialization segment written with it.
+     *
+     * @throws SegmentNotFoundException
+     * @throws SegmentNotReadyException
+     * @throws InvalidMediaException
+     */
+    protected function packageSegment(int $variant, int $index, ?Track $track, int $stream, string $path, string $needed): string
+    {
         $media = $this->media($variant);
         $rendition = $this->rendition($variant);
         $segment = $this->segments($variant)[$index];
@@ -954,9 +967,9 @@ class DirectStream
 
         try {
             return Cache::lock("media:segment:{$path}", $timeout)
-                ->block($rendition !== null && is_numeric($wait) ? (int) $wait : $timeout, function () use ($media, $segment, $path, $track, $stream, $rendition): string {
+                ->block($rendition !== null && is_numeric($wait) ? (int) $wait : $timeout, function () use ($media, $segment, $path, $needed, $track, $stream, $rendition): string {
                     // Another request may have packaged it while this one waited for the lock.
-                    if (! $this->cacheDisk()->exists($path)) {
+                    if (! $this->cacheDisk()->exists($needed)) {
                         $track !== null ? $this->packageFragment($media, $segment, $track, $stream, $path, $rendition) : $this->package($media, $segment, $path);
                     }
 
@@ -997,7 +1010,8 @@ class DirectStream
         $path = $this->initPath($media, $track, $stream, $this->rendition($variant));
 
         if (! $this->cacheDisk()->exists($path)) {
-            $this->segment($variant, 0, $track, $stream);
+            // Not segment(), which stops at a cached segment 0, while its init segment can be gone.
+            $this->packageSegment($variant, 0, $track, $stream, $this->segmentPathFor($variant, 0, $track, $stream), $path);
         }
 
         return $path;
@@ -1173,7 +1187,8 @@ class DirectStream
             $queue = Config::get('media.delivery.look_ahead_queue');
 
             foreach ($missing as $index) {
-                Bus::dispatch(
+                // Not Bus::dispatch(), which doesn't take the lock of unique jobs.
+                dispatch(
                     new PackageSegments($media->disk()->name(), $media->path(), [$index], $track, $this->targetDuration(), $this->cacheDisk()->name(), $stream, ...$this->renditionJob($variant))
                         ->onConnection(is_string($connection) ? $connection : null)
                         ->onQueue(is_string($queue) ? $queue : null),

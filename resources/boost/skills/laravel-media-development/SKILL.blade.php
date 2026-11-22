@@ -138,7 +138,7 @@ public function segment(Video $video, int $variant, int $segment): Response
 - **Formats:** each route picks its own segment format, so one stream definition serves all three URLs. Prefer `url()` (CMAF): one set of cached fragments serves HLS and DASH, and every player plays it natively. MPEG-TS (`hlsUrl()`) is for rotating encryption keys and old devices; Shaka Player needs mux.js loaded (`window.muxjs`) to play it.
 - `segmentDuration()` overrides `media.delivery.segment_duration` per stream.
 - **Cache layout:** segments are stored at `{cache_path}/{version key}/{segment duration}/{track}/{n}.m4s` (`{n}.ts` for MPEG-TS), with one `init.mp4` per track that's written with the first fragment and kept. The version key hashes the disk, path, size and modification time of the source, so every request, viewer and look-ahead job for the same file reuses the same segments, CMAF HLS and DASH share them, and a replaced file gets a new directory. `{{ $assist->artisanCommand('media:prune --older-than=0') }}` empties the segment cache, e.g. to test packaging again.
-- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments (`.ts`, `.m4s` and `init.mp4`) and converted subtitles (`.vtt`) packaged more than `--older-than` minutes ago (default a week) from the cache disk. `--dry-run` counts them.
+- **Pruning:** segments are packaged again when requested, so the cache can be pruned at any time. Schedule `{{ $assist->artisanCommand('media:prune') }}` daily; it deletes segments (`.ts`, `.m4s` and `init.mp4`) and converted subtitles (`.vtt`) packaged more than `--older-than` minutes ago (default a week) from the cache disk, but keeps an `init.mp4` while newer segments next to it need it. `--dry-run` counts them.
 
 ### Fragmented MP4 and DASH
 
@@ -700,7 +700,7 @@ public function handle(): void
 
 ## Queue jobs, crashes and cleanup
 
-- **After every job:** temporary directories are deleted when a queue job finishes or throws (`media.temporary_files.cleanup_after_jobs`, on by default), and at the end of each request.
+- **After every job:** the temporary directories a job created (not those of a job that ran it with `dispatchSync()`) are deleted when it finishes or throws (`media.temporary_files.cleanup_after_jobs`, on by default), and at the end of each request.
 - **Timeouts:** when a job times out, Laravel's worker kills itself with SIGKILL. The package listens for `JobTimedOut` and `WorkerStopping` first, stops the running ffmpeg (SIGTERM, then SIGKILL) so it doesn't keep running as an orphan, and deletes the temporary directories. Still give long encodes a `->timeout()` below the job's `$timeout`, so they fail cleanly with a retryable `Timeout` instead.
 - **Crashes:** schedule `media:clean` to remove directories left behind by OOM kills, crashes or power loss. It only deletes the package's own directories (16 hex characters) that haven't been written to for longer than `--older-than` minutes (default: `media.timeout` plus an hour), so it's safe on shared mounts such as `/dev/shm`. `--dry-run` lists them.
 - **Partial exports:** when one file of an export fails to upload, the files of that export that did reach the disk are deleted (`media.uploads.rollback_on_failure`), so retries start clean.
