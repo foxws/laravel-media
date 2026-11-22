@@ -113,19 +113,49 @@ class Media
     }
 
     /**
-     * The input options as ffmpeg and ffprobe arguments, to put before the input.
+     * The ffmpeg and ffprobe arguments to put before the input: the formats and protocols it may
+     * be read with, and the input options.
      *
      * @return list<string>
      */
     public function inputArguments(): array
     {
         $arguments = [];
+        $formats = $this->formatWhitelist();
+
+        if ($formats !== null) {
+            $arguments = ['-format_whitelist', $formats, '-protocol_whitelist', $this->protocolWhitelist()];
+        }
 
         foreach ($this->inputOptions() as $option => $value) {
             array_push($arguments, "-{$option}", $value);
         }
 
         return $arguments;
+    }
+
+    /**
+     * The demuxers the file may be opened with, or null when media.inputs.format_whitelist is off.
+     * image2 is left out for names with a "%", which it reads as a pattern of other files.
+     */
+    public function formatWhitelist(): ?string
+    {
+        $formats = Config::get('media.inputs.format_whitelist');
+
+        if (! is_array($formats) || $formats === []) {
+            return null;
+        }
+
+        if (str_contains($this->path, '%')) {
+            $formats = array_diff($formats, ['image2']);
+        }
+
+        return implode(',', $formats);
+    }
+
+    protected function protocolWhitelist(): string
+    {
+        return $this->readsFromUrl() ? 'http,https,httpproxy,tls,tcp' : 'file';
     }
 
     protected function readsFromUrl(): bool

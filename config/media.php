@@ -190,6 +190,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inputs
+    |--------------------------------------------------------------------------
+    |
+    | The ffmpeg demuxers media may be opened with, by their name in
+    | "ffmpeg -demuxers". ffmpeg picks one from a file's content, so formats
+    | that open other files or URLs (HLS, DASH, concat, IMF, SDP) are left
+    | out: an uploaded "video.mp4" could otherwise read other media or make
+    | requests. Only add those for files you wrote yourself. Protocols are
+    | limited too: files for local paths, HTTP(S) for remote inputs. Set the
+    | list to null to turn both limits off.
+    |
+    */
+
+    'inputs' => [
+        'format_whitelist' => [
+            // Containers
+            'mov', 'mp4', 'm4a', '3gp', '3g2', 'mj2', 'matroska', 'webm', 'avi', 'flv', 'asf', 'mpeg', 'mpegts',
+            'mxf', 'gxf', 'nut', 'ogg', 'rm', 'wtv', 'dv', 'swf', 'ivf',
+
+            // Raw video
+            'mpegvideo', 'm4v', 'h261', 'h263', 'h264', 'hevc', 'vvc', 'av1', 'obu', 'vc1', 'mjpeg', 'yuv4mpegpipe',
+
+            // Audio
+            'wav', 'w64', 'aiff', 'au', 'caf', 'flac', 'mp3', 'aac', 'ac3', 'eac3', 'dts', 'dtshd', 'truehd', 'mlp',
+            'amr', 'ape', 'wv', 'tta', 'tak', 'loas', 'voc', 'mpc', 'mpc8', 'dsf', 'iff', 'oma',
+
+            // Images
+            'image2', 'png_pipe', 'jpeg_pipe', 'webp_pipe', 'bmp_pipe', 'tiff_pipe', 'gif', 'apng',
+            'jpegxl_pipe', 'jpegxl_anim', 'webp_anim',
+
+            // Subtitles
+            'srt', 'ass', 'webvtt', 'sup',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Remote Inputs
     |--------------------------------------------------------------------------
     |

@@ -15,4 +15,12 @@ abstract class TestCase extends Orchestra
             MediaServiceProvider::class,
         ];
     }
+
+    /**
+     * Tests compare whole commands, so the input whitelists are left out except in InputWhitelistTest.
+     */
+    protected function defineEnvironment($app): void
+    {
+        $app['config']->set('media.inputs.format_whitelist', null);
+    }
 }
