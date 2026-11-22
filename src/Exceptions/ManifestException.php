@@ -8,11 +8,6 @@ use RuntimeException;
 
 class ManifestException extends RuntimeException
 {
-    public static function tooManySegments(): self
-    {
-        return new self('The manifest has too many segments to list one by one.');
-    }
-
     public static function notOpened(): self
     {
         return new self('No manifest has been opened. Call open() with its path first.');
@@ -26,5 +21,10 @@ class ManifestException extends RuntimeException
     public static function unprocessable(string $error): self
     {
         return new self("The manifest couldn't be processed: {$error}.");
+    }
+
+    public static function tooManySegments(): self
+    {
+        return new self('The manifest has too many segments to list one by one.');
     }
 }
