@@ -53,3 +53,12 @@ it('responds with the dash content type', function () {
 
     expect($response->headers->get('Content-Type'))->toBe('application/dash+xml');
 });
+
+it('resolves a base url of the directory itself', function () {
+    Storage::fake('streams');
+    Storage::disk('streams')->put('videos/1/manifest.mpd', '<MPD><BaseURL>./</BaseURL></MPD>');
+
+    $manifest = new DynamicDASHManifest('streams')->open('videos/1/manifest.mpd')->resolveMediaUrlsUsing(fn (string $path) => "signed:{$path}");
+
+    expect($manifest->get())->toContain('<BaseURL>signed:videos/1</BaseURL>');
+});

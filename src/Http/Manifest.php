@@ -149,7 +149,7 @@ abstract class Manifest implements Responsable
 
         $path = implode('/', $segments);
 
-        if ($directory !== '' && ! str_starts_with($path, "{$directory}/")) {
+        if ($directory !== '' && $path !== $directory && ! str_starts_with($path, "{$directory}/")) {
             throw ManifestException::outsideDirectory($uri, $directory);
         }
 
