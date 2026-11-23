@@ -2,6 +2,36 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.6.1 - 2026-11-23
+
+This release fixes several security issues. Upgrade if you process media from users or other untrusted sources.
+
+Some fixes change behavior:
+
+- Inputs only open with the demuxers in the new `media.inputs.format_whitelist`. HLS, DASH, concat and other formats that open more files or URLs are refused. Add their format to the list to open playlists or manifests you wrote yourself.
+- Dynamic manifests only resolve URIs inside the manifest's directory. Call `within()` with the stream's directory when manifests are nested.
+- Segments, subtitles and chapters are sent with `Cache-Control: private`, so shared caches and CDNs no longer store them.
+- Encrypted segments get new IVs and are encrypted again on their next request. Export packages again that shared a key with other content.
+- Process results, logs, events and exceptions have URL credentials and queries redacted. Use `$media->inputPath()` when you need a signed URL.
+- `MediaFile::video()` refuses still images, a maximum fails when the duration or size is unknown, and the limits apply to every stream.
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Fix the changelog workflow on PHP 8.6 by @francoism90 in https://github.com/foxws/laravel-media/pull/68
+* Fix pruning, unique look-ahead jobs and cleanup by @francoism90 in https://github.com/foxws/laravel-media/pull/76
+* Fail closed in the MediaFile rule by @francoism90 in https://github.com/foxws/laravel-media/pull/75
+* Redact URL secrets and more sensitive options by @francoism90 in https://github.com/foxws/laravel-media/pull/74
+* Escape playlist values and harden stream delivery by @francoism90 in https://github.com/foxws/laravel-media/pull/73
+* Derive segment IVs from their content and keep key files private by @francoism90 in https://github.com/foxws/laravel-media/pull/72
+* Cap what is read and listed from media headers by @francoism90 in https://github.com/foxws/laravel-media/pull/71
+* Keep paths inside their directory by @francoism90 in https://github.com/foxws/laravel-media/pull/70
+* Limit the formats and protocols inputs are read with by @francoism90 in https://github.com/foxws/laravel-media/pull/69
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.6.0...0.6.1
+
 ## 0.6.0 - 2026-11-19
 
 This release requires PHP 8.5 or newer. PHP 8.4 is no longer supported, and PHP 8.6 is now tested in CI. Stay on the previous version if you still run PHP 8.4.
