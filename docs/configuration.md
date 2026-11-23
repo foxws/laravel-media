@@ -58,6 +58,14 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | `playback.audio_bitrate` | `MEDIA_PLAYBACK_AUDIO_BITRATE` | `192` | AAC bitrate in kbit/s for audio that doesn't play |
 | `playback.hardware` | `MEDIA_PLAYBACK_HARDWARE` | `null` (the CPU) | `vaapi`, `nvenc` or `qsv` encodes video that doesn't play on the GPU |
 
+## Inputs
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `inputs.format_whitelist` | Common video, audio, image and subtitle demuxers | The formats media may be opened with. `null` turns the format and protocol limits off |
+
+ffmpeg picks a demuxer from a file's content, so HLS, DASH, concat and other formats that open more files or URLs aren't in the list. An input in one of those formats fails to open, whatever its extension. If you open playlists or manifests you wrote yourself, add their format (`hls`, `dash`) to the list, and don't open uploads with that configuration. Local files can only use the file protocol, and remote inputs only HTTP(S).
+
 ## Remote inputs
 
 | Key | Variable | Default | Purpose |

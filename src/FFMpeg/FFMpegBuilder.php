@@ -524,7 +524,10 @@ class FFMpegBuilder
     {
         $this->ensureConcatenable();
 
+        $formats = $this->opener->mediaFor()->formatWhitelist();
+
         return [
+            ...($formats !== null ? ['-format_whitelist', "concat,{$formats}"] : []),
             '-f', 'concat',
             '-safe', '0',
             '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
@@ -546,7 +549,10 @@ class FFMpegBuilder
         $this->concatDirectory->put('concat.txt', implode('', array_map(function (Media $media): string {
             $entry = "file '".str_replace("'", "'\\''", $media->inputPath())."'\n";
 
-            foreach ($media->inputOptions() as $option => $value) {
+            $formats = $media->formatWhitelist();
+            $options = [...($formats !== null ? ['format_whitelist' => $formats] : []), ...$media->inputOptions()];
+
+            foreach ($options as $option => $value) {
                 $entry .= "option {$option} {$value}\n";
             }
 
