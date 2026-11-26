@@ -43,7 +43,7 @@ it('creates a clip', function () {
 
 ## Capabilities
 
-The fake ffmpeg has nothing compiled in. `$fake->withCapabilities(['encoders' => ['libx264'], 'hwaccels' => ['vaapi']])` sets what `Media::capabilities()` and `media:info` report.
+The fake ffmpeg has nothing compiled in. `$fake->withCapabilities(['encoders' => ['libx264'], 'hwaccels' => ['vaapi']])` sets what `Media::capabilities()` and `media:doctor` report.
 
 ## Assertions
 

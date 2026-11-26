@@ -50,7 +50,7 @@ it('reads the names below the headings of protocols, bitstream filters and hardw
     'hardware accelerations' => [Capability::HardwareAccelerations, "Hardware acceleration methods:\ncuda\nvaapi\n\n", ['cuda', 'vaapi']],
 ]);
 
-it('names the option and the media:info flag of each kind', function () {
+it('names the option and the media:doctor flag of each kind', function () {
     expect(Capability::Encoders->argument())->toBe('-encoders')
         ->and(Capability::BitstreamFilters->argument())->toBe('-bsfs')
         ->and(Capability::HardwareAccelerations->singular())->toBe('hwaccel')

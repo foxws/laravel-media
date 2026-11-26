@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media;
 
 use Foxws\Media\Commands\CleanCommand;
-use Foxws\Media\Commands\InfoCommand;
+use Foxws\Media\Commands\DoctorCommand;
 use Foxws\Media\Commands\PruneCommand;
 use Foxws\Media\Delivery\CacheIndexStore;
 use Foxws\Media\Delivery\DatabaseIndexStore;
@@ -92,7 +92,7 @@ class MediaServiceProvider extends ServiceProvider
 
         $this->commands([
             CleanCommand::class,
-            InfoCommand::class,
+            DoctorCommand::class,
             PruneCommand::class,
         ]);
 

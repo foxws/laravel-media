@@ -33,21 +33,23 @@ MEDIA_FFMPEG_PATH=/usr/local/bin/ffmpeg
 MEDIA_FFPROBE_PATH=/usr/local/bin/ffprobe
 ```
 
-Check what's found, with paths and versions:
+Check the setup:
 
 ```bash
-php artisan media:info
+php artisan media:doctor
 ```
 
-`php artisan about` has a Media section too. A missing executable throws `ExecutableNotFoundException`, which names the variable to set. When an executable is found but can't run, for example because a shared library is missing, the Version column shows its exit code and error instead of a version.
+It checks that ffmpeg and ffprobe are found and report their version, with their paths, and that a directory can be created in the temporary files root (and the cache root, when set) with `min_free` space left. It exits with an error when a check fails, so it works as a deploy step or container health check; `--json` prints the checks for scripts. Executables registered by other packages are only warned about when they're missing, since they're only needed when used.
+
+`php artisan about` has a Media section too. A missing executable throws `ExecutableNotFoundException`, which names the variable to set. When an executable is found but can't run, for example because a shared library is missing, the doctor shows its exit code and error.
 
 ## Check what ffmpeg was built with
 
-Builds differ: a distribution package may lack `libsvtav1`, `zscale` or VAAPI support. Pass what your app needs, and `media:info` exits with an error when any of it is missing, so it works as a deploy or container health check:
+Builds differ: a distribution package may lack `libsvtav1`, `zscale` or VAAPI support. Pass what your app needs, and `media:doctor` fails when any of it is missing:
 
 ```bash
-php artisan media:info --encoder=libx264 --encoder=libsvtav1 --muxer=dash --filter=zscale --hwaccel=vaapi
-php artisan media:info --encoder=libx264 --json
+php artisan media:doctor --encoder=libx264 --encoder=libsvtav1 --muxer=dash --filter=zscale --hwaccel=vaapi
+php artisan media:doctor --encoder=libx264 --json
 ```
 
 The options are `--encoder`, `--decoder`, `--muxer`, `--demuxer`, `--filter`, `--protocol`, `--bsf` and `--hwaccel`, each repeatable. In code, `Media::capabilities()` asks ffmpeg for the same lists:

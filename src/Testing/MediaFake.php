@@ -101,7 +101,7 @@ class MediaFake extends MediaFactory
     }
 
     /**
-     * Fake what ffmpeg was built with for Media::capabilities() and media:info, as names keyed by
+     * Fake what ffmpeg was built with for Media::capabilities() and media:doctor, as names keyed by
      * Capability value, e.g. ['encoders' => ['libx264', 'aac'], 'hwaccels' => ['vaapi']].
      * Without it, the fake ffmpeg has nothing compiled in.
      *

@@ -35,10 +35,10 @@ composer require foxws/laravel-media
 php artisan vendor:publish --tag="media-config"
 ```
 
-Check that ffmpeg and ffprobe are found:
+Check that ffmpeg and ffprobe run and the temporary files root is usable:
 
 ```bash
-php artisan media:info
+php artisan media:doctor
 ```
 
 See [Installation](https://foxws.nl/laravel-media/installation) for the scheduled commands and queue setup.

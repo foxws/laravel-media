@@ -27,7 +27,7 @@ enum Capability: string
     }
 
     /**
-     * The name of one component of this kind, as used by the media:info options.
+     * The name of one component of this kind, as used by the media:doctor options.
      */
     public function singular(): string
     {
