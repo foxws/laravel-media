@@ -522,7 +522,8 @@ $media->ffmpeg()
   - `Scale::fit()` (letterbox to an exact size) and `Scale::fill()` (crop to an exact size)
   - `new Crop(...)`, `new Pad(...)`, `Rotate::clockwise()`/`counterClockwise()`/`upsideDown()`/`flipHorizontally()`/`flipVertically()`
   - `new Fps(30)`, `Fade::in()`/`out()`
-- **Audio filters:** `Fade::audioIn()`/`audioOut()`, `Volume::times(0.5)`/`decibels(-6)`, `new Loudnorm(-16, -1.5, 11)`.
+- **Audio filters:** `Fade::audioIn()`/`audioOut()`, `Volume::times(0.5)`/`decibels(-6)`, `new Loudnorm(-16, -1.5, 11)`. `Loudnorm` resamples to 48 kHz afterwards (`sampleRate:`, null keeps loudnorm's 192 kHz in dynamic mode).
+- **Two-pass loudness:** `$media->loudness(audioStream: 0)` measures with loudnorm's first pass (cached on the opener) and returns a `LoudnessMeasurement` (`integrated`, `truePeak`, `range`, `threshold`, `targetOffset`; `-inf` values such as silence are null, `isSilent()`). `new Loudnorm(-16)->withMeasurement($measurement)` is the second pass; `isLinear()` tells whether ffmpeg keeps the dynamics with one gain or falls back to dynamic mode. It measures the whole stream, so measure the clip itself when exporting part of it.
 - `Custom::video('hqdn3d')` or `Custom::audio('atempo=1.25')` covers any other filter.
 
 ### HDR to SDR
@@ -752,6 +753,7 @@ Media::assertNotRan(Executable::FFMpeg, fn (array $arguments) => in_array('-pass
 
 - Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `subtitles`, `audioLanguages`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
 - `$fake->failNext(Executable::FFMpeg, 'Invalid data found')` (on the fake `Media::fake()` returned; calling it again starts a new fake) makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
+- `$fake->loudness('talk.mp4', integrated: -30, truePeak: -12)` fakes what `loudness()` measures (default -23 LUFS, -4 dBTP, 7 LU; null for silence).
 - `$fake->respondUsing($binary, fn (array $arguments) => $output)` fakes the output of an add-on's executable, or its error output and exit code with `Process::result()`; without it, add-on executables run as successful with no output.
 - `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
 - Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.
