@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foxws\Media;
 
 use Foxws\Media\Concerns\ResolvesFromContainer;
+use Foxws\Media\Executables\Capabilities;
 use Foxws\Media\Filesystem\Disk;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Traits\Macroable;
@@ -30,5 +31,13 @@ class MediaFactory
     public function open(string|array ...$paths): Opener
     {
         return app(Opener::class)->open(...$paths);
+    }
+
+    /**
+     * What the configured ffmpeg was built with. Runs ffmpeg once per kind of component.
+     */
+    public function capabilities(): Capabilities
+    {
+        return Capabilities::detect();
     }
 }

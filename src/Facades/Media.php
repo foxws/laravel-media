@@ -16,10 +16,12 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @method static \Foxws\Media\Opener fromDisk(\Foxws\Media\Filesystem\Disk|\Illuminate\Contracts\Filesystem\Filesystem|string $disk)
  * @method static \Foxws\Media\Opener open(string|list<string> ...$paths)
+ * @method static \Foxws\Media\Executables\Capabilities capabilities()
  * @method static void assertRan(\Foxws\Media\Executables\Binary $executable, (\Closure(list<string>): bool)|null $callback = null)
  * @method static void assertNotRan(\Foxws\Media\Executables\Binary $executable, (\Closure(list<string>): bool)|null $callback = null)
  * @method static void assertRanTimes(\Foxws\Media\Executables\Binary $executable, int $times)
  * @method static \Foxws\Media\Testing\MediaFake loudness(string $path, ?float $integrated = -23.0, ?float $truePeak = -4.0, float $range = 7.0, ?float $threshold = -33.5)
+ * @method static \Foxws\Media\Testing\MediaFake withCapabilities(array<string, list<string>> $names)
  * @method static \Foxws\Media\Testing\MediaFake respondUsing(\Foxws\Media\Executables\Binary $executable, \Closure(list<string>): string $respond)
  * @method static void assertNothingRan()
  * @method static void assertProbed(string $path)

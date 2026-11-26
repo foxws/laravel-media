@@ -627,6 +627,8 @@ Failed copies throw `ExportFailedException`, whose `failures` property lists eac
 
 Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set. One that is found but can't run (e.g. a missing shared library) shows its exit code and error in the Version column.
 
+To check what ffmpeg was built with, pass requirements to `{{ $assist->artisanCommand('media:info') }}`: `--encoder`, `--decoder`, `--muxer`, `--demuxer`, `--filter`, `--protocol`, `--bsf` and `--hwaccel` (repeatable), plus `--json`. It exits with an error when one is missing, so it fits a deploy step or container health check. In code, `Media::capabilities()` returns `Foxws\Media\Executables\Capabilities` with `has(Capability::Encoders, 'libsvtav1')`, `all()`, `missing(['encoders' => [...], 'hwaccels' => ['vaapi']])` and `require([...])`, which throws `MissingCapabilitiesException`. It runs ffmpeg once per kind, so don't call it per request. A compiled-in hwaccel doesn't prove the GPU opens; `HardwareAcceleration` checks that.
+
 ### Executables from other packages
 
 Add-on packages bring their own executables by implementing `Foxws\Media\Executables\Binary`, usually on an enum:
@@ -754,6 +756,7 @@ Media::assertNotRan(Executable::FFMpeg, fn (array $arguments) => in_array('-pass
 - Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `subtitles`, `audioLanguages`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
 - `$fake->failNext(Executable::FFMpeg, 'Invalid data found')` (on the fake `Media::fake()` returned; calling it again starts a new fake) makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
 - `$fake->loudness('talk.mp4', integrated: -30, truePeak: -12)` fakes what `loudness()` measures (default -23 LUFS, -4 dBTP, 7 LU; null for silence).
+- `$fake->withCapabilities(['encoders' => ['libx264'], 'hwaccels' => ['vaapi']])` sets what `Media::capabilities()` and `media:info` report; the fake ffmpeg has nothing compiled in otherwise.
 - `$fake->respondUsing($binary, fn (array $arguments) => $output)` fakes the output of an add-on's executable, or its error output and exit code with `Process::result()`; without it, add-on executables run as successful with no output.
 - `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
 - Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.
