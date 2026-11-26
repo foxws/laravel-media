@@ -671,7 +671,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `delivery.hardware` | GPU for renditions encoded on request (`MEDIA_DELIVERY_HARDWARE`), defaulting to `ladder.hardware` |
 | `playback.video_codecs`, `.audio_codecs`, `.video_codec`, `.crf`, `.preset`, `.audio_bitrate`, `.hardware` | What browsers play through a direct stream, and how `makePlayable()` re-encodes the rest |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
-| `idle_timeout` | Seconds an ffmpeg export, thumbnail sheet or ladder may write no progress before it's stopped (`MEDIA_IDLE_TIMEOUT`, off) |
+| `idle_timeout` | Seconds an ffmpeg export or ladder may write no progress before it's stopped (`MEDIA_IDLE_TIMEOUT`, off); thumbnail sheets don't use it |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |
 | `inputs.format_whitelist` | The demuxers inputs may be opened with; `null` turns the format and protocol limits off |
@@ -703,7 +703,7 @@ public function handle(): void
 @endboostsnippet
 
 - `->timeout($seconds)` on the builder or `thumbnails()` overrides `media.timeout`. Keep it below the job's `$timeout`, so the package stops ffmpeg and throws a `Timeout` failure instead of the worker being killed.
-- `->idleTimeout($seconds)` on the builder or `thumbnails()` overrides `media.idle_timeout`: ffmpeg is stopped with a retryable `Timeout` failure when it writes no progress for that long, e.g. a stalled S3 or HTTP read. ffmpeg then always reports progress (about twice a second), even without `onProgress()`. Direct streams and packaging only use `timeout()`.
+- `->idleTimeout($seconds)` on the builder or `thumbnails()` overrides `media.idle_timeout`: ffmpeg is stopped with a retryable `Timeout` failure when it writes no progress for that long, e.g. a stalled S3 or HTTP read. ffmpeg then always reports progress (about twice a second once it writes output; the time until its first output counts too), even without `onProgress()`. `withoutIdleTimeout()` turns it off for one export. `thumbnails()` doesn't use `media.idle_timeout`, since ffmpeg writes nothing until a whole sheet is decoded; its own `idleTimeout()` must cover that. Direct streams and packaging only use `timeout()`.
 - Failures are logged as errors with the same context. Successful runs that still wrote to the error output are logged as warnings (unless `Runner::run()` gets `logWarnings: false`). Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to see why output from damaged files looks wrong.
 - **Events:** `Process\Events\ProcessStarted`, `ProcessCompleted` and `ProcessFailed` (with `$result` and `$reason`) are dispatched for every ffmpeg/ffprobe run, with the command redacted.
 - **Other exceptions** live in `Foxws\Media\Exceptions` too: `ExecutableNotFoundException`, `InvalidMediaException`, `InvalidFormatException`, `InvalidFilterException`, `ExportFailedException`, `InsufficientStorageException` and `TemporaryFileException`.

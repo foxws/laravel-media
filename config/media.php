@@ -168,10 +168,10 @@ return [
     | Idle Timeout
     |--------------------------------------------------------------------------
     |
-    | Seconds an ffmpeg export, thumbnail sheet or rendition ladder may write
-    | no progress before it's stopped, e.g. because reading a remote input
-    | stalled. ffmpeg reports progress about twice a second while it works.
-    | Leave empty to only use the timeout above.
+    | Seconds an ffmpeg export or rendition ladder may write no progress
+    | before it's stopped, e.g. because reading a remote input stalled.
+    | ffmpeg reports progress about twice a second once it writes output.
+    | Thumbnail sheets don't use it. Leave empty to only use the timeout.
     |
     */
 

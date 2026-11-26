@@ -118,6 +118,16 @@ it('passes its idle timeout to ffmpeg', function () {
     Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && $process->idleTimeout === 45);
 });
 
+it('ignores the configured idle timeout, since ffmpeg writes nothing until a sheet is full', function () {
+    fakeThumbnailProcesses(duration: 25);
+    config(['media.idle_timeout' => 60]);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->save('storyboard');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && $process->idleTimeout === null);
+});
+
 it('continues on the next sheet when the grid is full', function () {
     fakeThumbnailProcesses(duration: 60);
     Storage::fake('videos');

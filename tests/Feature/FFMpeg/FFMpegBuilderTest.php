@@ -580,6 +580,20 @@ it('uses the configured idle timeout, which its own replaces', function (?string
     'empty' => ['', null, null],
 ]);
 
+it('turns the configured idle timeout off for one export', function () {
+    fakeExecutable(Executable::FFMpeg);
+    config(['media.idle_timeout' => 60]);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->withoutIdleTimeout()->save('out.mp4');
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->withoutIdleTimeout()->idleTimeout(20)->save('again.mp4');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && str_ends_with(end($process->command), 'out.mp4')
+        && $process->idleTimeout === null && ! in_array('-progress', $process->command, true));
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && str_ends_with(end($process->command), 'again.mp4') && $process->idleTimeout === 20);
+});
+
 it('uses the configured ffmpeg log level', function () {
     fakeExecutable(Executable::FFMpeg);
     config(['media.ffmpeg_log_level' => 'warning']);

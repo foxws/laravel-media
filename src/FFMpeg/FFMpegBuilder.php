@@ -93,6 +93,8 @@ class FFMpegBuilder
 
     protected ?int $idleTimeout = null;
 
+    protected bool $withoutIdleTimeout = false;
+
     public function __construct(
         protected Opener $opener,
         protected Runner $runner,
@@ -313,12 +315,26 @@ class FFMpegBuilder
     /**
      * Stop ffmpeg when it writes no progress for this many seconds, instead of the configured
      * media.idle_timeout, e.g. because reading a remote input stalled. ffmpeg reports its
-     * progress about twice a second while it works, so a stalled run fails early with a
-     * retryable timeout instead of hanging until the total timeout.
+     * progress about twice a second once it has written its first output, so a stalled run
+     * fails early with a retryable timeout instead of hanging until the total timeout.
+     * The time until that first output counts too, so leave room for slow starts.
      */
     public function idleTimeout(int $seconds): static
     {
         $this->idleTimeout = $seconds;
+        $this->withoutIdleTimeout = false;
+
+        return $this;
+    }
+
+    /**
+     * Don't stop ffmpeg for writing no progress, also when media.idle_timeout is set,
+     * e.g. for outputs that take long to write their first frame.
+     */
+    public function withoutIdleTimeout(): static
+    {
+        $this->idleTimeout = null;
+        $this->withoutIdleTimeout = true;
 
         return $this;
     }
@@ -686,6 +702,10 @@ class FFMpegBuilder
      */
     protected function resolveIdleTimeout(): ?int
     {
+        if ($this->withoutIdleTimeout) {
+            return null;
+        }
+
         if ($this->idleTimeout !== null) {
             return $this->idleTimeout;
         }
