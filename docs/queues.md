@@ -72,7 +72,8 @@ public function handle(): void
 - An ffmpeg build that can't start, for example because a shared library it was built with is missing, fails with `BrokenExecutable` instead of looking like a missing input. `php artisan media:doctor` shows the loader's message.
 - Reported exceptions include the exit code, the redacted command and the last lines of ffmpeg's output without keys or URL signatures, so they're readable in Sentry, Flare or Nightwatch.
 - Give long encodes a `timeout()` below the job's `$timeout`, so ffmpeg is stopped and the job fails with a retryable timeout instead of the worker being killed.
-- `idleTimeout()` (or `MEDIA_IDLE_TIMEOUT`) stops ffmpeg sooner when it writes no progress for that many seconds, for example because reading a remote input stalled. ffmpeg reports its progress about twice a second while it works, so a value of a minute or two leaves plenty of room. It applies to the ffmpeg builder, `ladder()` and `thumbnails()`; the short runs of direct streams and packaging only use `timeout()`.
+- `idleTimeout()` (or `MEDIA_IDLE_TIMEOUT`) stops ffmpeg sooner when it writes no progress for that many seconds, for example because reading a remote input stalled. ffmpeg reports its progress about twice a second once it writes output, and the time until its first output counts too, so a value of a minute or two leaves plenty of room. It applies to the ffmpeg builder and `ladder()`; `withoutIdleTimeout()` turns it off for one export.
+- Thumbnail sheets don't use `MEDIA_IDLE_TIMEOUT`, because ffmpeg writes nothing until a whole sheet is decoded, which can take minutes for long or high-resolution video. Set `thumbnails()->idleTimeout()` to longer than that if you want one. The short runs of direct streams and packaging only use `timeout()`.
 - Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to log the warnings of runs that succeeded, for example to see why output from a damaged file looks wrong.
 
 ## Temporary files and crashes

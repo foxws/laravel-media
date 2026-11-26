@@ -16,7 +16,7 @@ Publish the config file with `php artisan vendor:publish --tag="media-config"`. 
 | `executables.ffprobe` | `MEDIA_FFPROBE_PATH` | `ffprobe` | Path or command name |
 | `packager.default` | `MEDIA_PACKAGER` | `native` | The [packaging](packaging.md) driver |
 | `timeout` | `MEDIA_TIMEOUT` | `14400` | Seconds a process may run; keep it at or below your jobs' `$timeout` |
-| `idle_timeout` | `MEDIA_IDLE_TIMEOUT` | empty | Seconds an ffmpeg export, thumbnail sheet or ladder may write no progress before it's stopped; empty turns it off |
+| `idle_timeout` | `MEDIA_IDLE_TIMEOUT` | empty | Seconds an ffmpeg export or ladder may write no progress before it's stopped; thumbnail sheets don't use it; empty turns it off |
 | `log_channel` | `MEDIA_LOG_CHANNEL` | the default channel | Where runs are logged; `false` turns logging off |
 | `ffmpeg_log_level` | `MEDIA_FFMPEG_LOG_LEVEL` | `error` | ffmpeg's `-loglevel`; `warning` logs warnings of successful runs |
 

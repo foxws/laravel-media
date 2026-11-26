@@ -189,7 +189,9 @@ class Thumbnails
     }
 
     /**
-     * The seconds ffmpeg may write no progress, instead of the configured media.idle_timeout.
+     * The seconds ffmpeg may write no progress. ffmpeg writes nothing until the first sheet
+     * is full (columns × rows × the interval of video decoded), so sheets don't use the
+     * configured media.idle_timeout; allow at least that long when you set one here.
      */
     public function idleTimeout(int $seconds): static
     {
@@ -264,7 +266,11 @@ class Thumbnails
             ->when($this->visibility !== null, fn (FFMpegBuilder $builder) => $builder->withVisibility((string) $this->visibility))
             ->withContext($this->context)
             ->when($this->timeout !== null, fn (FFMpegBuilder $builder) => $builder->timeout((int) $this->timeout))
-            ->when($this->idleTimeout !== null, fn (FFMpegBuilder $builder) => $builder->idleTimeout((int) $this->idleTimeout))
+            ->when(
+                $this->idleTimeout !== null,
+                fn (FFMpegBuilder $builder) => $builder->idleTimeout((int) $this->idleTimeout),
+                fn (FFMpegBuilder $builder) => $builder->withoutIdleTimeout(),
+            )
             ->when($this->reportsProgress(), fn (FFMpegBuilder $builder) => $builder->onProgress($this->reportProgress(...)))
             ->save("{$name}_%03d.{$this->extension}");
 
