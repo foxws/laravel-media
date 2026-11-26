@@ -6,12 +6,12 @@ namespace Foxws\Media\Executables;
 
 /**
  * A program the Runner can run. Packages that add an executable implement it, usually on an enum,
- * and register it with Executables::register() to list it in media:info and "php artisan about".
+ * and register it with Executables::register() to list it in media:doctor and "php artisan about".
  */
 interface Binary
 {
     /**
-     * The executable's name, as shown in logs, errors and media:info.
+     * The executable's name, as shown in logs, errors and media:doctor.
      */
     public function identifier(): string;
 

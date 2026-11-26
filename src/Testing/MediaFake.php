@@ -6,6 +6,8 @@ namespace Foxws\Media\Testing;
 
 use Closure;
 use Foxws\Media\Executables\Binary;
+use Foxws\Media\Executables\Capabilities;
+use Foxws\Media\Executables\Capability;
 use Foxws\Media\Executables\Executable;
 use Foxws\Media\MediaFactory;
 use Illuminate\Contracts\Process\ProcessResult;
@@ -33,6 +35,9 @@ class MediaFake extends MediaFactory
 
     /** @var array<string, Closure(list<string>): (string|ProcessResult)> */
     protected array $responses = [];
+
+    /** @var array<string, list<string>> */
+    protected array $capabilities = [];
 
     /**
      * @param  array<string, array<string, mixed>>  $probes  ffprobe output keyed by (the end of) a media path; see FakeProbe.
@@ -93,6 +98,27 @@ class MediaFake extends MediaFactory
             ?? ['input_i' => '-23.00', 'input_tp' => '-4.00', 'input_lra' => '7.00', 'input_thresh' => '-33.50', 'target_offset' => '0.00'];
 
         return "[Parsed_loudnorm_0 @ 0x0] \n".(string) json_encode($values, JSON_PRETTY_PRINT)."\n";
+    }
+
+    /**
+     * Fake what ffmpeg was built with for Media::capabilities() and media:doctor, as names keyed by
+     * Capability value, e.g. ['encoders' => ['libx264', 'aac'], 'hwaccels' => ['vaapi']].
+     * Without it, the fake ffmpeg has nothing compiled in.
+     *
+     * @param  array<string, list<string>>  $names
+     */
+    public function withCapabilities(array $names): static
+    {
+        foreach ($names as $kind => $list) {
+            $this->capabilities[Capability::from($kind)->value] = $list;
+        }
+
+        return $this;
+    }
+
+    public function capabilities(): Capabilities
+    {
+        return new Capabilities($this->capabilities);
     }
 
     /**

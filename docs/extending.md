@@ -51,7 +51,7 @@ enum EncoderExecutable: string implements Binary
 }
 ```
 
-Register it in a service provider, so `media:info` and `about` list it:
+Register it in a service provider, so `media:doctor` and `about` list it:
 
 ```php
 use Foxws\Media\Executables\Executables;

@@ -19,7 +19,7 @@ class Executables
     protected array $registered = [];
 
     /**
-     * Add executables from other packages to media:info and "php artisan about".
+     * Add executables from other packages to media:doctor and "php artisan about".
      */
     public function register(Binary ...$binaries): static
     {

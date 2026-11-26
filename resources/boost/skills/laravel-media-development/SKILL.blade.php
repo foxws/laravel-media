@@ -625,7 +625,9 @@ Failed copies throw `ExportFailedException`, whose `failures` property lists eac
 
 ## Executables
 
-Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set. One that is found but can't run (e.g. a missing shared library) shows its exit code and error in the Version column.
+Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:doctor') }}` to check that they're found and report their version, and that the temporary files root (and cache root) is writable with `min_free` space; it exits with an error when a check fails (`--json` for scripts), and only warns about missing executables of other packages. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set. One that is found but can't run (e.g. a missing shared library) fails with its exit code and error.
+
+To check what ffmpeg was built with, pass requirements to `{{ $assist->artisanCommand('media:doctor') }}`: `--encoder`, `--decoder`, `--muxer`, `--demuxer`, `--filter`, `--protocol`, `--bsf` and `--hwaccel` (repeatable). It fails when one is missing. In code, `Media::capabilities()` returns `Foxws\Media\Executables\Capabilities` with `has(Capability::Encoders, 'libsvtav1')`, `all()`, `missing(['encoders' => [...], 'hwaccels' => ['vaapi']])` and `require([...])`, which throws `MissingCapabilitiesException`. It runs ffmpeg once per kind, so don't call it per request. A compiled-in hwaccel doesn't prove the GPU opens; `HardwareAcceleration` checks that.
 
 ### Executables from other packages
 
@@ -643,7 +645,7 @@ enum EncoderExecutable: string implements Binary
 }
 
 // in the add-on's service provider
-$this->app->make(Executables::class)->register(EncoderExecutable::Encoder);   // lists it in media:info and about
+$this->app->make(Executables::class)->register(EncoderExecutable::Encoder);   // lists it in media:doctor and about
 Opener::macro('encoder', fn () => new EncoderBuilder($this));             // $opener->encoder()
 @endboostsnippet
 
@@ -754,6 +756,7 @@ Media::assertNotRan(Executable::FFMpeg, fn (array $arguments) => in_array('-pass
 - Unknown paths probe as a one-minute 1080p H.264 video with AAC audio. Use `'*'` as the key to fake every probe, e.g. for uploads, which have random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])` makes `MediaFile::video()->minDuration(10)` fail. `FakeProbe::video()` also takes `width`, `height`, `codec`, `audio: false`, `subtitles`, `audioLanguages`, `transfer: 'smpte2084'` (HDR) and `frameRate`.
 - `$fake->failNext(Executable::FFMpeg, 'Invalid data found')` (on the fake `Media::fake()` returned; calling it again starts a new fake) makes the next run throw `ProcessFailedException`. Use it to test failure handling and retries.
 - `$fake->loudness('talk.mp4', integrated: -30, truePeak: -12)` fakes what `loudness()` measures (default -23 LUFS, -4 dBTP, 7 LU; null for silence).
+- `$fake->withCapabilities(['encoders' => ['libx264'], 'hwaccels' => ['vaapi']])` sets what `Media::capabilities()` and `media:doctor` report; the fake ffmpeg has nothing compiled in otherwise.
 - `$fake->respondUsing($binary, fn (array $arguments) => $output)` fakes the output of an add-on's executable, or its error output and exit code with `Process::result()`; without it, add-on executables run as successful with no output.
 - `onProgress()` callbacks receive 50% and 100%. Probes and scenes are matched against the end of the opened path.
 - Other assertions: `assertRanTimes()`, `assertNothingRan()`, `assertNotSaved()`. `Media::fake()` returns the fake, whose `commands(Executable::FFMpeg)` lists the recorded arguments.
