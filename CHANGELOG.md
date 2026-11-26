@@ -2,6 +2,34 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.7.0 - 2026-11-26
+
+This release adds `media:doctor`, an idle timeout, checks of what ffmpeg was built with, and two-pass loudness normalization.
+
+Some changes affect existing apps:
+
+- `media:info` is replaced by `media:doctor`. It still lists the executables with their paths and versions. It also checks that ffmpeg and ffprobe start and that the temporary files root is usable, and exits with an error when a check fails. Pass `--encoder`, `--muxer`, `--hwaccel` and similar options to require what your app needs, or `--json` for scripts.
+- `Loudnorm` resamples to 48 kHz afterwards. Its dynamic mode works at 192 kHz, which made AAC output 96 kHz and PCM output 192 kHz. Pass `sampleRate: null` to keep the old behavior.
+- An ffmpeg that can't start, for example because a shared library is missing, fails with the new `FailureReason::BrokenExecutable`, which isn't retryable, instead of `MissingInput`.
+
+New:
+
+- `MEDIA_IDLE_TIMEOUT` and `idleTimeout()` stop an ffmpeg export, thumbnail sheet or ladder that writes no progress, such as a stalled S3 or HTTP read. It fails with a retryable `Timeout` instead of hanging until `media.timeout`. It's off by default.
+- `Media::capabilities()` lists what ffmpeg was built with, and has `has()`, `missing()` and `require()`. Use `Media::fake()->withCapabilities()` in tests.
+- `$media->loudness()` measures an audio stream, and `new Loudnorm()->withMeasurement($measurement)` normalizes it in a second pass. That's more accurate, and keeps the dynamics when the measurement allows linear mode.
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Recognise an ffmpeg that can't start as a broken executable by @francoism90 in https://github.com/foxws/laravel-media/pull/77
+* Stop ffmpeg when it writes no progress for the idle timeout by @francoism90 in https://github.com/foxws/laravel-media/pull/78
+* Add two-pass loudness normalization by @francoism90 in https://github.com/foxws/laravel-media/pull/80
+* Add media:doctor and check what ffmpeg was built with by @francoism90 in https://github.com/foxws/laravel-media/pull/79
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.6.1...0.7.0
+
 ## 0.6.1 - 2026-11-23
 
 This release fixes several security issues. Upgrade if you process media from users or other untrusted sources.
