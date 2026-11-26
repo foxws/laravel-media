@@ -221,6 +221,38 @@ it('turns a timeout into a retryable failure and passes the reason to the failed
     Event::assertDispatched(ProcessFailed::class, fn (ProcessFailed $event) => $event->reason === FailureReason::Timeout);
 });
 
+it('stops a process that writes no output for the idle timeout', function () {
+    $script = sys_get_temp_dir().'/laravel-media-stalling-ffmpeg';
+    file_put_contents($script, "#!/bin/sh\necho 'progress=continue'\nsleep 10\n");
+    chmod($script, 0755);
+    config(['media.executables.ffmpeg' => $script]);
+    app(Executables::class)->flush();
+    Event::fake([ProcessFailed::class]);
+    $startedAt = microtime(true);
+
+    expect(fn () => Runner::make()->run(Executable::FFMpeg, [], timeout: 60, idleTimeout: 2))
+        ->toThrow(fn (ProcessFailedException $exception) => expect($exception)
+            ->reason->toBe(FailureReason::Timeout)
+            ->isRetryable()->toBeTrue()
+            ->result->exitCode->toBe(124)
+            ->getMessage()->toBe('ffmpeg was stopped after writing no output for 2 seconds.'));
+
+    expect(microtime(true) - $startedAt)->toBeLessThan(5);
+    Event::assertDispatched(ProcessFailed::class, fn (ProcessFailed $event) => $event->reason === FailureReason::Timeout);
+})->skipOnWindows();
+
+it('leaves the idle timeout off for later runs', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Process::fake();
+    $runner = Runner::make();
+
+    $runner->run(Executable::FFMpeg, ['-i', 'first.mp4'], idleTimeout: 30);
+    $runner->run(Executable::FFMpeg, ['-i', 'second.mp4']);
+
+    Process::assertRan(fn ($process) => in_array('first.mp4', $process->command, true) && $process->idleTimeout === 30);
+    Process::assertRan(fn ($process) => in_array('second.mp4', $process->command, true) && $process->idleTimeout === null);
+});
+
 it('logs failures with their report context and warnings of successful runs', function () {
     fakeExecutable(Executable::FFMpeg);
     $logger = new class extends AbstractLogger

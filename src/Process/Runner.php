@@ -16,9 +16,11 @@ use Foxws\Media\Process\Events\ProcessStarted;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
 use Illuminate\Process\FakeInvokedProcess;
 use Illuminate\Process\InvokedProcess;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Process\Exception\ProcessTimedOutException as SymfonyProcessTimedOutException;
 use Throwable;
 
 class Runner
@@ -54,6 +56,11 @@ class Runner
 
     protected int $runs = 0;
 
+    /**
+     * The seconds the run being started may go without output, passed from run() to execute().
+     */
+    protected ?int $idleTimeout = null;
+
     public function __construct(
         protected Executables $executables,
         protected ?LoggerInterface $logger = null,
@@ -64,6 +71,8 @@ class Runner
      * Run the executable with the given arguments. The output callbacks receive standard
      * output and error output as they stream in, e.g. to parse progress. Turn off
      * logWarnings for programs that report their progress or results on the error output.
+     * The idle timeout stops a run that writes no output for that many seconds, so only pass it
+     * for runs that keep writing while they work, such as ffmpeg with "-progress pipe:1".
      *
      * @param  list<string>  $arguments
      * @param  (callable(string): mixed)|null  $onOutput
@@ -72,7 +81,7 @@ class Runner
      *
      * @throws ProcessFailedException
      */
-    public function run(Binary $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null, array $environment = [], ?callable $onErrorOutput = null, bool $logWarnings = true): Result
+    public function run(Binary $executable, array $arguments, ?int $timeout = null, ?callable $onOutput = null, array $environment = [], ?callable $onErrorOutput = null, bool $logWarnings = true, ?int $idleTimeout = null): Result
     {
         $command = [$this->executables->path($executable), ...$arguments];
 
@@ -86,6 +95,8 @@ class Runner
 
         $timeout ??= $this->timeout;
 
+        $this->idleTimeout = $idleTimeout;
+
         try {
             [$exitCode, $output, $errorOutput] = $this->execute($executable, $command, $timeout, $this->outputHandler($onOutput, $onErrorOutput), $environment);
         } catch (ProcessCancelledException) {
@@ -93,17 +104,20 @@ class Runner
                 new Result($executable, $redacted, 130, '', '', (hrtime(true) - $startedAt) / 1e9),
             ));
         } catch (ProcessTimedOutException $exception) {
-            $this->fail(ProcessFailedException::timedOut(
-                new Result(
-                    $executable,
-                    $redacted,
-                    124,
-                    $this->redactOutput($exception->result->output(), $command),
-                    $this->redactUrls($exception->result->errorOutput()),
-                    (hrtime(true) - $startedAt) / 1e9,
-                ),
-                $timeout,
-            ));
+            $result = new Result(
+                $executable,
+                $redacted,
+                124,
+                $this->redactOutput($exception->result->output(), $command),
+                $this->redactUrls($exception->result->errorOutput()),
+                (hrtime(true) - $startedAt) / 1e9,
+            );
+
+            $this->fail($idleTimeout !== null && $this->isIdleTimeout($exception)
+                ? ProcessFailedException::idleTimedOut($result, $idleTimeout)
+                : ProcessFailedException::timedOut($result, $timeout));
+        } finally {
+            $this->idleTimeout = null;
         }
 
         $result = new Result(
@@ -129,6 +143,16 @@ class Runner
         Event::dispatch(new ProcessCompleted($result));
 
         return $result;
+    }
+
+    /**
+     * Whether the process was stopped for writing no output, rather than for running too long.
+     */
+    protected function isIdleTimeout(ProcessTimedOutException $exception): bool
+    {
+        $original = $exception->getPrevious();
+
+        return $original instanceof SymfonyProcessTimedOutException && $original->isIdleTimeout();
     }
 
     /**
@@ -183,11 +207,14 @@ class Runner
 
         // The callback goes to start(), because Symfony already reads available
         // output when starting, which a callback passed to wait() would miss.
-        $process = Process::timeout($timeout)->env($environment)->start($command, function (string $type, string $output) use ($onOutput, $id): void {
-            if ($onOutput !== null && isset($this->streaming[$id])) {
-                $onOutput($output, $type);
-            }
-        });
+        $process = Process::timeout($timeout)
+            ->when($this->idleTimeout !== null, fn (PendingProcess $pending): PendingProcess => $pending->idleTimeout((int) $this->idleTimeout))
+            ->env($environment)
+            ->start($command, function (string $type, string $output) use ($onOutput, $id): void {
+                if ($onOutput !== null && isset($this->streaming[$id])) {
+                    $onOutput($output, $type);
+                }
+            });
 
         $this->running[$id] = $process;
 

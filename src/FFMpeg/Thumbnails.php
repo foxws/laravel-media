@@ -59,6 +59,8 @@ class Thumbnails
 
     protected ?int $timeout = null;
 
+    protected ?int $idleTimeout = null;
+
     protected ?Closure $urlResolver = null;
 
     protected ?Tonemap $toneMap;
@@ -187,6 +189,16 @@ class Thumbnails
     }
 
     /**
+     * The seconds ffmpeg may write no progress, instead of the configured media.idle_timeout.
+     */
+    public function idleTimeout(int $seconds): static
+    {
+        $this->idleTimeout = $seconds;
+
+        return $this;
+    }
+
+    /**
      * Resolve the image URL written in each cue, from a sprite sheet's path on the target disk.
      * By default cues use the sheet's file name, relative to the WebVTT file.
      *
@@ -252,6 +264,7 @@ class Thumbnails
             ->when($this->visibility !== null, fn (FFMpegBuilder $builder) => $builder->withVisibility((string) $this->visibility))
             ->withContext($this->context)
             ->when($this->timeout !== null, fn (FFMpegBuilder $builder) => $builder->timeout((int) $this->timeout))
+            ->when($this->idleTimeout !== null, fn (FFMpegBuilder $builder) => $builder->idleTimeout((int) $this->idleTimeout))
             ->when($this->reportsProgress(), fn (FFMpegBuilder $builder) => $builder->onProgress($this->reportProgress(...)))
             ->save("{$name}_%03d.{$this->extension}");
 

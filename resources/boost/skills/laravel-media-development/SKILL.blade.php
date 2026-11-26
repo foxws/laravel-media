@@ -668,6 +668,7 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 | `delivery.hardware` | GPU for renditions encoded on request (`MEDIA_DELIVERY_HARDWARE`), defaulting to `ladder.hardware` |
 | `playback.video_codecs`, `.audio_codecs`, `.video_codec`, `.crf`, `.preset`, `.audio_bitrate`, `.hardware` | What browsers play through a direct stream, and how `makePlayable()` re-encodes the rest |
 | `timeout` | Process timeout in seconds; keep it at or below the queue job's `$timeout` |
+| `idle_timeout` | Seconds an ffmpeg export, thumbnail sheet or ladder may write no progress before it's stopped (`MEDIA_IDLE_TIMEOUT`, off) |
 | `log_channel` | Log channel, `false` to disable |
 | `ffmpeg_log_level` | ffmpeg's `-loglevel` (`error`); `warning` logs warnings of successful runs (`MEDIA_FFMPEG_LOG_LEVEL`) |
 | `inputs.format_whitelist` | The demuxers inputs may be opened with; `null` turns the format and protocol limits off |
@@ -691,7 +692,7 @@ use Foxws\Media\Exceptions\ProcessFailedException;
 public function handle(): void
 {
     try {
-        Media::fromDisk('s3')->open($this->path)->ffmpeg()->timeout(1800)->inFormat(Format::h264())->save($this->output);
+        Media::fromDisk('s3')->open($this->path)->ffmpeg()->timeout(1800)->idleTimeout(120)->inFormat(Format::h264())->save($this->output);
     } catch (ProcessFailedException $exception) {
         $exception->isRetryable() ? $this->release(60) : $this->fail($exception);
     }
@@ -699,6 +700,7 @@ public function handle(): void
 @endboostsnippet
 
 - `->timeout($seconds)` on the builder or `thumbnails()` overrides `media.timeout`. Keep it below the job's `$timeout`, so the package stops ffmpeg and throws a `Timeout` failure instead of the worker being killed.
+- `->idleTimeout($seconds)` on the builder or `thumbnails()` overrides `media.idle_timeout`: ffmpeg is stopped with a retryable `Timeout` failure when it writes no progress for that long, e.g. a stalled S3 or HTTP read. ffmpeg then always reports progress (about twice a second), even without `onProgress()`. Direct streams and packaging only use `timeout()`.
 - Failures are logged as errors with the same context. Successful runs that still wrote to the error output are logged as warnings (unless `Runner::run()` gets `logWarnings: false`). Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to see why output from damaged files looks wrong.
 - **Events:** `Process\Events\ProcessStarted`, `ProcessCompleted` and `ProcessFailed` (with `$result` and `$reason`) are dispatched for every ffmpeg/ffprobe run, with the command redacted.
 - **Other exceptions** live in `Foxws\Media\Exceptions` too: `ExecutableNotFoundException`, `InvalidMediaException`, `InvalidFormatException`, `InvalidFilterException`, `ExportFailedException`, `InsufficientStorageException` and `TemporaryFileException`.
