@@ -23,6 +23,13 @@ it('names the reason and the last lines of the error output in its message', fun
         ->and($exception->getCode())->toBe(1);
 });
 
+it('does not retry an executable that could not start', function () {
+    $exception = ProcessFailedException::for(failedResult('ffmpeg: error while loading shared libraries: libx264.so.164: cannot open shared object file: No such file or directory', 127));
+
+    expect($exception->reason)->toBe(FailureReason::BrokenExecutable)
+        ->and($exception->isRetryable())->toBeFalse();
+});
+
 it('adds the command and error output to reports', function () {
     $exception = ProcessFailedException::for(failedResult(implode("\n", range(1, 30))));
 

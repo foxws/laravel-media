@@ -624,7 +624,7 @@ Failed copies throw `ExportFailedException`, whose `failures` property lists eac
 
 ## Executables
 
-Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set.
+Each executable resolves lazily: an absolute path from config, or a command name found in the `PATH` or the project root. Only the tools you call need to be installed. Run `{{ $assist->artisanCommand('media:info') }}` to see which are found, with their paths and versions. `{{ $assist->artisanCommand('about') }}` also has a Media section with the disk, temporary root, timeout and executables. A missing one throws `ExecutableNotFoundException`, which names the env key to set. One that is found but can't run (e.g. a missing shared library) shows its exit code and error in the Version column.
 
 ### Executables from other packages
 
@@ -681,8 +681,8 @@ Publish with `{{ $assist->artisanCommand('vendor:publish --tag=media-config') }}
 ## Errors, retries and logging
 
 Failed runs throw `Foxws\Media\Exceptions\ProcessFailedException`:
-- `$exception->reason` is a `FailureReason` recognised from ffmpeg's error output: `InvalidInput`, `MissingInput`, `UnsupportedCodec`, `InvalidOptions`, `PermissionDenied`, `NoSpace`, `Network`, `Timeout` or `Unknown`.
-- `$exception->isRetryable()` is true for `Network`, `Timeout`, `NoSpace` and `Unknown`. Broken uploads, missing codecs or wrong options fail the same way every time.
+- `$exception->reason` is a `FailureReason` recognised from ffmpeg's error output and exit code: `BrokenExecutable` (ffmpeg couldn't start, e.g. a missing shared library), `InvalidInput`, `MissingInput`, `UnsupportedCodec`, `InvalidOptions`, `PermissionDenied`, `NoSpace`, `Network`, `Timeout` or `Unknown`.
+- `$exception->isRetryable()` is true for `Network`, `Timeout`, `NoSpace` and `Unknown`. Broken uploads, missing codecs, wrong options or a broken executable fail the same way every time.
 - When the exception is reported, its `context()` (executable, exit code, reason, redacted command, last 20 lines of error output) appears in the logs and in error trackers such as Sentry, Flare or Nightwatch.
 
 @boostsnippet("Retrying only what can recover", "php")

@@ -8,6 +8,7 @@ use Foxws\Media\Executables\Binary;
 use Foxws\Media\Executables\Executables;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Str;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 #[AsCommand(name: 'media:info')]
@@ -34,12 +35,22 @@ class InfoCommand extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * The first line of the version output, or why the executable couldn't report it,
+     * such as a shared library its build needs but the system doesn't have.
+     */
     protected function version(string $path, Binary $executable): string
     {
         $result = Process::timeout(10)->run([$path, ...$executable->versionArguments()]);
 
+        if ($result->failed()) {
+            $reason = trim(Str::afterLast(trim($result->errorOutput()), "\n"));
+
+            return $reason === '' ? "failed (exit {$result->exitCode()})" : "failed (exit {$result->exitCode()}): {$reason}";
+        }
+
         $firstLine = strtok(trim($result->output()), "\n");
 
-        return $result->successful() && $firstLine !== false ? $firstLine : 'unknown';
+        return $firstLine !== false ? $firstLine : 'unknown';
     }
 }

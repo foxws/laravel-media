@@ -24,7 +24,7 @@ class ProcessFailedException extends RuntimeException
 
     public static function for(Result $result, ?FailureReason $reason = null): self
     {
-        $reason ??= FailureReason::fromErrorOutput($result->errorOutput.' '.$result->output);
+        $reason ??= FailureReason::fromResult($result->exitCode, $result->errorOutput.' '.$result->output);
 
         return new self(
             sprintf('%s exited with code %d (%s): %s', $result->executable->identifier(), $result->exitCode, $reason->value, static::tail($result, 5)),

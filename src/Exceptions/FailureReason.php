@@ -9,6 +9,7 @@ namespace Foxws\Media\Exceptions;
  */
 enum FailureReason: string
 {
+    case BrokenExecutable = 'broken_executable';
     case InvalidInput = 'invalid_input';
     case MissingInput = 'missing_input';
     case UnsupportedCodec = 'unsupported_codec';
@@ -26,6 +27,9 @@ enum FailureReason: string
      * @var array<string, list<string>>
      */
     private const array PATTERNS = [
+        'broken_executable' => [
+            'error while loading shared libraries', 'cannot open shared object file', 'library not loaded', 'symbol lookup error',
+        ],
         'no_space' => ['no space left on device', 'disk quota exceeded'],
         'permission_denied' => ['permission denied', 'operation not permitted', 'access denied', 'server returned 403'],
         'missing_input' => ['no such file or directory', 'server returned 404', 'does not exist'],
@@ -46,6 +50,21 @@ enum FailureReason: string
         ],
     ];
 
+    /**
+     * Exit codes the operating system returns when it can't run the executable at all.
+     */
+    private const array LAUNCH_EXIT_CODES = [126, 127];
+
+    /**
+     * Why a process that exited with the given code and output failed.
+     */
+    public static function fromResult(int $exitCode, string $output): self
+    {
+        return in_array($exitCode, self::LAUNCH_EXIT_CODES, true)
+            ? self::BrokenExecutable
+            : self::fromErrorOutput($output);
+    }
+
     public static function fromErrorOutput(string $output): self
     {
         $output = strtolower($output);
@@ -63,7 +82,7 @@ enum FailureReason: string
 
     /**
      * Whether trying again later may succeed: the network, a timeout or a full disk can recover,
-     * while broken input, unsupported codecs or wrong options fail the same way every time.
+     * while broken input, unsupported codecs, wrong options or a broken executable fail the same way every time.
      */
     public function isRetryable(): bool
     {

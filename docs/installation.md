@@ -39,7 +39,7 @@ Check what's found, with paths and versions:
 php artisan media:info
 ```
 
-`php artisan about` has a Media section too. A missing executable throws `ExecutableNotFoundException`, which names the variable to set.
+`php artisan about` has a Media section too. A missing executable throws `ExecutableNotFoundException`, which names the variable to set. When an executable is found but can't run, for example because a shared library is missing, the Version column shows its exit code and error instead of a version.
 
 ## Schedule the cleanup commands
 
