@@ -109,6 +109,15 @@ it('decodes only keyframes when asked', function () {
         && array_slice($process->command, array_search('-i', $process->command, true) - 2, 2) === ['-skip_frame', 'nokey']);
 });
 
+it('passes its idle timeout to ffmpeg', function () {
+    fakeThumbnailProcesses(duration: 25);
+    Storage::fake('videos');
+
+    Media::fromDisk('videos')->open('video.mp4')->thumbnails()->every(10)->idleTimeout(45)->save('storyboard');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg) && $process->idleTimeout === 45);
+});
+
 it('continues on the next sheet when the grid is full', function () {
     fakeThumbnailProcesses(duration: 60);
     Storage::fake('videos');

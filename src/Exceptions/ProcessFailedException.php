@@ -24,7 +24,7 @@ class ProcessFailedException extends RuntimeException
 
     public static function for(Result $result, ?FailureReason $reason = null): self
     {
-        $reason ??= FailureReason::fromErrorOutput($result->errorOutput.' '.$result->output);
+        $reason ??= FailureReason::fromResult($result->exitCode, $result->errorOutput.' '.$result->output);
 
         return new self(
             sprintf('%s exited with code %d (%s): %s', $result->executable->identifier(), $result->exitCode, $reason->value, static::tail($result, 5)),
@@ -37,6 +37,18 @@ class ProcessFailedException extends RuntimeException
     {
         return new self(
             sprintf('%s was stopped after the timeout of %d seconds.', $result->executable->identifier(), $timeout),
+            $result,
+            FailureReason::Timeout,
+        );
+    }
+
+    /**
+     * The process wrote no output for the idle timeout, e.g. because reading its input stalled.
+     */
+    public static function idleTimedOut(Result $result, int $idleTimeout): self
+    {
+        return new self(
+            sprintf('%s was stopped after writing no output for %d seconds.', $result->executable->identifier(), $idleTimeout),
             $result,
             FailureReason::Timeout,
         );

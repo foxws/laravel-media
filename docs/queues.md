@@ -59,6 +59,7 @@ public function handle(): void
     try {
         Media::fromDisk('s3')->open($this->path)->ffmpeg()
             ->timeout(1800)
+            ->idleTimeout(120)
             ->inFormat(Format::h264())
             ->save($this->output);
     } catch (ProcessFailedException $exception) {
@@ -68,8 +69,10 @@ public function handle(): void
 ```
 
 - Network errors, timeouts and full disks are retryable. Broken files, missing codecs and invalid options fail the same way every time.
+- An ffmpeg build that can't start, for example because a shared library it was built with is missing, fails with `BrokenExecutable` instead of looking like a missing input. `php artisan media:info` shows the loader's message in its Version column.
 - Reported exceptions include the exit code, the redacted command and the last lines of ffmpeg's output without keys or URL signatures, so they're readable in Sentry, Flare or Nightwatch.
 - Give long encodes a `timeout()` below the job's `$timeout`, so ffmpeg is stopped and the job fails with a retryable timeout instead of the worker being killed.
+- `idleTimeout()` (or `MEDIA_IDLE_TIMEOUT`) stops ffmpeg sooner when it writes no progress for that many seconds, for example because reading a remote input stalled. ffmpeg reports its progress about twice a second while it works, so a value of a minute or two leaves plenty of room. It applies to the ffmpeg builder, `ladder()` and `thumbnails()`; the short runs of direct streams and packaging only use `timeout()`.
 - Set `MEDIA_FFMPEG_LOG_LEVEL=warning` to log the warnings of runs that succeeded, for example to see why output from a damaged file looks wrong.
 
 ## Temporary files and crashes
