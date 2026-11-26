@@ -42,6 +42,18 @@ class ProcessFailedException extends RuntimeException
         );
     }
 
+    /**
+     * The process wrote no output for the idle timeout, e.g. because reading its input stalled.
+     */
+    public static function idleTimedOut(Result $result, int $idleTimeout): self
+    {
+        return new self(
+            sprintf('%s was stopped after writing no output for %d seconds.', $result->executable->identifier(), $idleTimeout),
+            $result,
+            FailureReason::Timeout,
+        );
+    }
+
     public static function cancelled(Result $result): self
     {
         return new self(

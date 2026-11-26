@@ -548,6 +548,38 @@ it('runs ffmpeg with its own timeout instead of the configured one', function ()
     Process::assertRan(fn ($process) => $process->timeout === 120);
 });
 
+it('asks ffmpeg for progress to watch for an idle timeout, without a progress callback', function () {
+    fakeExecutable(Executable::FFMpeg);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()->idleTimeout(30)->save('out.mp4');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
+        && $process->idleTimeout === 30
+        && array_slice($process->command, 1, 3) === ['-progress', 'pipe:1', '-nostats']);
+});
+
+it('uses the configured idle timeout, which its own replaces', function (?string $configured, ?int $own, ?int $expected) {
+    fakeExecutable(Executable::FFMpeg);
+    config(['media.idle_timeout' => $configured]);
+    Storage::fake('videos');
+    fakeFFMpegWriting();
+
+    Media::fromDisk('videos')->open('video.mp4')->ffmpeg()
+        ->when($own !== null, fn ($builder) => $builder->idleTimeout((int) $own))
+        ->save('out.mp4');
+
+    Process::assertRan(fn ($process) => runs($process, Executable::FFMpeg)
+        && $process->idleTimeout === $expected
+        && in_array('-progress', $process->command, true) === ($expected !== null));
+})->with([
+    'configured' => ['60', null, 60],
+    'own' => ['60', 15, 15],
+    'off' => [null, null, null],
+    'empty' => ['', null, null],
+]);
+
 it('uses the configured ffmpeg log level', function () {
     fakeExecutable(Executable::FFMpeg);
     config(['media.ffmpeg_log_level' => 'warning']);

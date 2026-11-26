@@ -91,6 +91,8 @@ class FFMpegBuilder
 
     protected ?int $timeout = null;
 
+    protected ?int $idleTimeout = null;
+
     public function __construct(
         protected Opener $opener,
         protected Runner $runner,
@@ -304,6 +306,19 @@ class FFMpegBuilder
     public function timeout(int $seconds): static
     {
         $this->timeout = $seconds;
+
+        return $this;
+    }
+
+    /**
+     * Stop ffmpeg when it writes no progress for this many seconds, instead of the configured
+     * media.idle_timeout, e.g. because reading a remote input stalled. ffmpeg reports its
+     * progress about twice a second while it works, so a stalled run fails early with a
+     * retryable timeout instead of hanging until the total timeout.
+     */
+    public function idleTimeout(int $seconds): static
+    {
+        $this->idleTimeout = $seconds;
 
         return $this;
     }
@@ -631,8 +646,16 @@ class FFMpegBuilder
      */
     protected function run(array $arguments, int $pass = 1, int $passes = 1): void
     {
+        $idleTimeout = $this->resolveIdleTimeout();
+
         if (! $this->reportsProgress()) {
-            $this->runner->run(Executable::FFMpeg, $arguments, $this->timeout);
+            // The idle timeout needs output to watch, so ffmpeg reports its progress anyway.
+            $this->runner->run(
+                Executable::FFMpeg,
+                $idleTimeout === null ? $arguments : ['-progress', 'pipe:1', '-nostats', ...$arguments],
+                $this->timeout,
+                idleTimeout: $idleTimeout,
+            );
 
             return;
         }
@@ -643,6 +666,7 @@ class FFMpegBuilder
             Executable::FFMpeg,
             ['-progress', 'pipe:1', '-nostats', ...$arguments],
             timeout: $this->timeout,
+            idleTimeout: $idleTimeout,
             onOutput: function (string $output) use ($parser, $pass, $passes): void {
                 foreach ($parser->feed($output) as $progress) {
                     $progress = $progress->forPass($pass, $passes);
@@ -655,6 +679,20 @@ class FFMpegBuilder
                 }
             },
         );
+    }
+
+    /**
+     * The idle timeout set on this builder, or the configured media.idle_timeout when it's a positive number.
+     */
+    protected function resolveIdleTimeout(): ?int
+    {
+        if ($this->idleTimeout !== null) {
+            return $this->idleTimeout;
+        }
+
+        $configured = Config::get('media.idle_timeout');
+
+        return is_numeric($configured) && (int) $configured > 0 ? (int) $configured : null;
     }
 
     /**
