@@ -2,6 +2,21 @@
 
 All notable changes to `laravel-media` will be documented in this file.
 
+## 0.7.1 - 2026-11-26
+
+This release fixes the idle timeout from 0.7.0 for thumbnail sheets.
+
+ffmpeg writes no progress until its first output, and a sheet is only written once it's full. On long or high-resolution video that can take minutes, so with `MEDIA_IDLE_TIMEOUT` set, 0.7.0 could stop a healthy `thumbnails()` run. Sheets now ignore the configured idle timeout, and only use one set with `thumbnails()->idleTimeout()`. Exports and ladders keep using it, and the new `withoutIdleTimeout()` turns it off for one export.
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+### What's Changed
+
+#### Other Changes
+
+* Keep thumbnail sheets off the configured idle timeout by @francoism90 in https://github.com/foxws/laravel-media/pull/81
+
+**Full Changelog**: https://github.com/foxws/laravel-media/compare/0.7.0...0.7.1
+
 ## 0.7.0 - 2026-11-26
 
 This release adds `media:doctor`, an idle timeout, checks of what ffmpeg was built with, and two-pass loudness normalization.
