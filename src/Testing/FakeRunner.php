@@ -38,7 +38,9 @@ class FakeRunner extends Runner
             Executable::FFProbe => [0, in_array('packet=pts_time,flags', $arguments, true)
                 ? $this->packets((string) end($arguments))
                 : (string) json_encode($this->fake->probeFor((string) end($arguments))), ''],
-            Executable::FFMpeg => [0, $this->ffmpeg($arguments, $onOutput), ''],
+            Executable::FFMpeg => in_array('loudnorm=print_format=json', $arguments, true)
+                ? [0, '', $this->fake->loudnessFor($arguments[array_search('-i', $arguments, true) + 1] ?? '')]
+                : [0, $this->ffmpeg($arguments, $onOutput), ''],
             default => $this->respond($executable, $arguments, $onOutput),
         };
     }

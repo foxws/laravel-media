@@ -244,7 +244,7 @@ it('applies video and audio filters as separate chains in order', function () {
         ->inFormat(Format::h264())
         ->arguments('out.mp4');
 
-    expect(array_slice($arguments, 7, 4))->toBe(['-vf', 'scale=1280:-2,fade=t=in:st=0:d=1', '-af', 'afade=t=in:st=0:d=1,loudnorm=I=-16:TP=-1.5:LRA=11'])
+    expect(array_slice($arguments, 7, 4))->toBe(['-vf', 'scale=1280:-2,fade=t=in:st=0:d=1', '-af', 'afade=t=in:st=0:d=1,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000'])
         ->and($arguments[11])->toBe('-c:v');
 });
 

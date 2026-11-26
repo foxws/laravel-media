@@ -28,6 +28,9 @@ class MediaFake extends MediaFactory
     /** @var array<string, list<string>> */
     protected array $failures = [];
 
+    /** @var array<string, array<string, string>> */
+    protected array $loudness = [];
+
     /** @var array<string, Closure(list<string>): (string|ProcessResult)> */
     protected array $responses = [];
 
@@ -59,6 +62,37 @@ class MediaFake extends MediaFactory
         $this->scenes[$path] = $changes;
 
         return $this;
+    }
+
+    /**
+     * Fake the loudness measured in media whose path ends with the given path, or "*" for any media.
+     * Without it, every audio stream measures -23 LUFS with a true peak of -4 dBTP and 7 LU range.
+     * Pass null for values ffmpeg reports as "-inf", as for silence.
+     */
+    public function loudness(string $path, ?float $integrated = -23.0, ?float $truePeak = -4.0, float $range = 7.0, ?float $threshold = -33.5): static
+    {
+        $format = fn (?float $value): string => $value === null ? '-inf' : number_format($value, 2, '.', '');
+
+        $this->loudness[$path] = [
+            'input_i' => $format($integrated),
+            'input_tp' => $format($truePeak),
+            'input_lra' => $format($range),
+            'input_thresh' => $format($threshold),
+            'target_offset' => '0.00',
+        ];
+
+        return $this;
+    }
+
+    /**
+     * The loudnorm measurement JSON for the input, as ffmpeg prints it.
+     */
+    public function loudnessFor(string $input): string
+    {
+        $values = $this->match($this->loudness, $input)
+            ?? ['input_i' => '-23.00', 'input_tp' => '-4.00', 'input_lra' => '7.00', 'input_thresh' => '-33.50', 'target_offset' => '0.00'];
+
+        return "[Parsed_loudnorm_0 @ 0x0] \n".(string) json_encode($values, JSON_PRETTY_PRINT)."\n";
     }
 
     /**

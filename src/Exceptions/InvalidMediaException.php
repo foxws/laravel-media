@@ -54,6 +54,11 @@ class InvalidMediaException extends RuntimeException
         return new self("A duration of {$duration} seconds in steps of {$interval} gives more than {$limit}, which is too many to list. The file's duration may be wrong.");
     }
 
+    public static function noLoudness(): self
+    {
+        return new self('ffmpeg reported no loudness measurement for the audio stream.');
+    }
+
     public static function noStreams(): self
     {
         return new self('Add at least one stream to package, e.g. with addStreamsFrom().');

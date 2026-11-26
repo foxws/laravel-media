@@ -15,6 +15,7 @@ use Foxws\Media\Encoding\Ladder;
 use Foxws\Media\Exceptions\InvalidMediaException;
 use Foxws\Media\Exceptions\MediaNotFoundException;
 use Foxws\Media\FFMpeg\FFMpegBuilder;
+use Foxws\Media\FFMpeg\LoudnessMeter;
 use Foxws\Media\FFMpeg\Output;
 use Foxws\Media\FFMpeg\Scene;
 use Foxws\Media\FFMpeg\SceneDetector;
@@ -22,6 +23,7 @@ use Foxws\Media\FFMpeg\Thumbnails;
 use Foxws\Media\Filesystem\Disk;
 use Foxws\Media\Filesystem\Media;
 use Foxws\Media\Filesystem\TemporaryDirectories;
+use Foxws\Media\Filters\LoudnessMeasurement;
 use Foxws\Media\Http\DynamicDASHManifest;
 use Foxws\Media\Http\DynamicHLSPlaylist;
 use Foxws\Media\Packaging\PackagingBuilder;
@@ -46,6 +48,9 @@ class Opener
 
     /** @var array<string, list<Scene>> */
     protected array $scenes = [];
+
+    /** @var array<string, LoudnessMeasurement> */
+    protected array $loudness = [];
 
     /** @var array<string, KeyframeIndex> */
     protected array $keyframes = [];
@@ -286,6 +291,21 @@ class Opener
             $this->probe($media->path())->duration(),
             $threshold,
         );
+    }
+
+    /**
+     * Measure the loudness of an audio stream of an opened file (the first one by default), the first
+     * pass of two-pass normalisation: pass it to Loudnorm::withMeasurement() for the second.
+     * It measures the whole stream, so measure the clip itself when only part is exported.
+     * Results are cached on this opener.
+     *
+     * @param  int  $audioStream  The position of the audio stream among the audio streams, from 0.
+     */
+    public function loudness(int $audioStream = 0, ?string $path = null): LoudnessMeasurement
+    {
+        $media = $this->mediaFor($path);
+
+        return $this->loudness[$media->path().'@'.$audioStream] ??= LoudnessMeter::make()->measure($media, $audioStream);
     }
 
     /**

@@ -35,6 +35,7 @@ it('creates a clip', function () {
 - `'*'` fakes every probe, e.g. for uploads with random temporary names: `Media::fake(['*' => FakeProbe::video(duration: 5)])`.
 - `FakeProbe::video()` takes `duration`, `width`, `height`, `codec`, `frameRate`, `audio: false`, `subtitles`, `audioLanguages` (one audio stream per language) and `transfer: 'smpte2084'` for HDR. `FakeProbe::audio()` takes `duration` and `codec`.
 - `$fake->scenes('movie.mkv', [12.5, 40.0])` fakes scene changes, where `$fake` is what `Media::fake()` returned. Calling `Media::fake()` again starts a new fake.
+- `$fake->loudness('talk.mp4', integrated: -30, truePeak: -12)` fakes what `loudness()` measures. By default every stream measures -23 LUFS, -4 dBTP and 7 LU. Pass null for silence.
 
 ## Failures
 

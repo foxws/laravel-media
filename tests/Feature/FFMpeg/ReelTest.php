@@ -60,7 +60,7 @@ it('fits clips to a given size and frame rate, and filters the joined result', f
         .'[0:a:0]asetpts=PTS-STARTPTS[a0];'
         .'[v0][a0]concat=n=1:v=1:a=1[joined][joineda];'
         .'[joined]fade=t=out:st=1.5:d=0.5[v];'
-        .'[joineda]loudnorm=I=-16:TP=-1.5:LRA=11[a]',
+        .'[joineda]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]',
     );
 });
 

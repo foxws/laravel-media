@@ -86,6 +86,30 @@ $media->ffmpeg()
 - **Audio:** `Fade::audioIn()`/`audioOut()`, `Volume::times()`/`decibels()` and `Loudnorm`.
 - **Anything else:** `Custom::video('hqdn3d')` or `Custom::audio('atempo=1.25')`.
 
+### Two-pass loudness normalization
+
+`new Loudnorm` normalizes in one pass, adjusting the gain as it goes. For a more accurate result, measure first with `loudness()` and pass the measurement to `withMeasurement()`:
+
+```php
+use Foxws\Media\Filters\Loudnorm;
+
+$media = Media::fromDisk('s3')->open('talk.mp4');
+
+$loudnorm = new Loudnorm(integrated: -16, truePeak: -1.5, range: 11)
+    ->withMeasurement($media->loudness());
+
+$media->ffmpeg()
+    ->addFilter($loudnorm)
+    ->inFormat(Format::h264())
+    ->save('talk-normalized.mp4');
+```
+
+- `loudness(audioStream: 1)` measures another audio stream, and `loudness(path: ...)` another opened file. Results are cached on the opener, and nothing is uploaded or saved.
+- The measurement has `integrated`, `truePeak`, `range`, `threshold` and `targetOffset`. Values ffmpeg reports as `-inf`, as for silence, are null; `isSilent()` tells, and silence is then normalized in one pass.
+- When the gain keeps the true peak and loudness range within the target, ffmpeg applies one gain to the whole stream (linear mode), so the dynamics stay as they are. Otherwise it falls back to dynamic mode. `$loudnorm->isLinear()` tells which one it'll use.
+- It measures the whole stream. When you export a clip, or add other audio filters before it, measure that output instead.
+- Dynamic mode works at 192 kHz, so `Loudnorm` resamples to 48 kHz afterwards. Pass `sampleRate: 44100` for another rate, or `null` to keep the rate loudnorm chooses.
+
 ### HDR to SDR
 
 HDR video looks washed out when it's encoded as regular SDR or turned into images. `toneMap()` converts it, and does nothing for SDR sources, so it's safe to always call:
